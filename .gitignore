@@ -1,0 +1,16 @@
+# 依赖与缓存
+node_modules/
+.npm-cache/
+
+# 打包产物（用 npm pack 随时能生成）
+dist/
+*.tgz
+
+# 本地预览 / 截图工具的临时产物
+preview.html
+preview-zoom.png
+.edge-profile/
+
+# 杂项
+.t.log
+.DS_Store

@@ -1,0 +1,6 @@
+# Bundle patch: insert this plugin as one row of the profile composition.
+# `id` is the row identity inside the profile; `name` is the package that
+# provides it (it must equal package.json "name").
+- insert:
+    - id: dsh-progress-caption
+      name: dsh-progress-caption
