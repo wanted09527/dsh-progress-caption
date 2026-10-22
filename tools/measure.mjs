@@ -1,6 +1,6 @@
 // 一次性排查脚本：把真实 CSS 抠出来，量「一行」时俏皮词胶囊是否被 .pgc-band 的
-// overflow:hidden 裁掉。用法：node tools/measure.mjs 生成 measure.html，
-// 再用 headless Edge 的 --dump-dom 读页面里写回 <pre> 的测量结果。
+// overflow 裁掉。用法：node tools/measure.mjs 生成 measure.html，再用 headless Edge 的
+// --dump-dom 读页面里写回 <pre> 的测量结果；带 ANIM=1 可量动画播放中的几何。
 import { readFileSync, writeFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
