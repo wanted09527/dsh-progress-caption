@@ -171,14 +171,24 @@ test('字幕条宽度跟输入框对齐：减掉两侧留白，不写 100%', () 
   assert.doesNotMatch(body, /(^|\W)width: 100%/, '写 100% 就会把整行撑满');
 });
 
-test('整条字幕条没有无限动画；只有状态点在安静档里做呼吸', () => {
+test('整条字幕条没有无限动画；小圆点在安静档只做呼吸，扫光档才跳', () => {
   const stripRule = /\.pgc-strip \{([\s\S]*?)\}/.exec(sheet)[1];
   assert.doesNotMatch(stripRule, /animation:/, '根节点上不许挂动画（会整条闪）');
-  assert.match(sheet, /\.pgc-anim-calm \.pgc-dot,\s*\n\s*\.pgc-anim-sweep \.pgc-dot \{ animation: pgc-breathe/,
-    '呼吸只给状态点');
+  assert.match(sheet, /\.pgc-anim-calm \.pgc-dot \{ animation: pgc-breathe/, '安静档只给状态点呼吸');
+  assert.match(sheet, /\.pgc-anim-sweep \.pgc-dot \{ animation: pgc-hop/, '扫光档才让三点跳');
   const breathe = /@keyframes pgc-breathe \{([\s\S]*?)\n\}/.exec(sheet);
   assert.ok(breathe, '要有 pgc-breathe');
   assert.doesNotMatch(breathe[1], /opacity:/, '呼吸不许动 opacity（会看着在闪）');
+  // 三点错相位靠负延迟：没有它们就是三颗点一起闪，那才是「闪」。
+  assert.match(sheet, /\.pgc-anim-sweep \.pgc-dot:nth-child\(2\) \{ animation-delay: -\.6s; \}/);
+  assert.match(sheet, /\.pgc-anim-sweep \.pgc-dot:nth-child\(3\) \{ animation-delay: -\.3s; \}/);
+  const loader = /\.pgc-loader \{([\s\S]*?)\}/.exec(sheet);
+  assert.ok(loader, '要有 .pgc-loader');
+  assert.match(loader[1], /width: 16px/, '三点总宽写死，跳起来也不会推动主文案');
+  const hop = /@keyframes pgc-hop \{([\s\S]*?)\n\}/.exec(sheet);
+  assert.ok(hop, '要有 pgc-hop');
+  assert.doesNotMatch(hop[1], /(width|height|margin|padding|top|left)/,
+    '起跳只许动 transform，别改宽高（会重排、会抖）');
 });
 
 test('俏皮词占固定宽度，换词不推挤主文案', () => {
@@ -679,20 +689,23 @@ test('主文案拼成一整句，免责声明不再挤占这一行', () => {
   assert.match(String(view.props.title || ''), /规则推断/);
 });
 
-test('状态点在扫光模式下也在（颜色就是状态），不靠文字徽标', () => {
+test('状态点固定三颗，装在 .pgc-loader 里，不靠文字徽标', () => {
   const view = render({
     partial: { turn: 1, step: 0, blocks: [{ kind: 'reasoning', text: '先看看 package.json' }] },
     runningCalls: [],
     nodes: [],
   });
   const dots = [];
+  const loaders = [];
   const walk = (node) => {
     if (!node || typeof node !== 'object') return;
     if (node.props && node.props.className === 'pgc-dot') dots.push(node);
+    if (node.props && node.props.className === 'pgc-loader') loaders.push(node);
     (node.children || []).forEach(walk);
   };
   walk(view);
-  assert.equal(dots.length, 1);
+  assert.equal(loaders.length, 1, '三点要装在一个 .pgc-loader 里，方便整体对齐');
+  assert.equal(dots.length, 3, '三颗点：靠负延迟错开相位，看着像排队跳');
 });
 
 test('工具参数 → 只显示文件名 / 搜索词，不显示整段 JSON', () => {
@@ -900,7 +913,7 @@ test('有俏皮词时让位给词，没词时显示「进行中」，俏皮词�
   };
   const classes = (liveOf(withWords).children || []).map((c) => (c && c.props && c.props.className) || '');
   assert.ok(classes.includes('pgc-flavor'), '应该有俏皮词');
-  assert.ok(classes.includes('pgc-dot'), '状态小圆点必须在，由它表达进行中');
+  assert.ok(classes.includes('pgc-loader'), '三点装载器必须在，由它表达进行中');
   assert.ok(!classes.includes('pgc-chip'), '有俏皮词时不再重复挂「进行中」，省出宽度');
   assert.equal(classes[classes.length - 1], 'pgc-flavor', '俏皮词固定在最右');
 });

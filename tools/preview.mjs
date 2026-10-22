@@ -117,19 +117,19 @@ const page = (theme) => `
 ${handle}
 ${strip('running', `
           <span class="pgc-step">第 3 步</span>
-          <span class="pgc-dot" aria-hidden="true"></span>
+          <span class="pgc-loader" aria-hidden="true"><span class="pgc-dot"></span><span class="pgc-dot"></span><span class="pgc-dot"></span></span>
           <span class="pgc-label">正在执行命令 npm test</span>
           <span class="pgc-time">1.2s</span>
           <span class="pgc-flavor">琢磨中</span>`)}
 ${strip('ok', `
           <span class="pgc-step">第 4 步</span>
-          <span class="pgc-dot" aria-hidden="true"></span>
+          <span class="pgc-loader" aria-hidden="true"><span class="pgc-dot"></span><span class="pgc-dot"></span><span class="pgc-dot"></span></span>
           <span class="pgc-label">命令完成 npm test</span>
           <span class="pgc-chip">成功</span>
           <span class="pgc-time">12.4s</span>`)}
 ${strip('error', `
           <span class="pgc-step">第 5 步</span>
-          <span class="pgc-dot" aria-hidden="true"></span>
+          <span class="pgc-loader" aria-hidden="true"><span class="pgc-dot"></span><span class="pgc-dot"></span><span class="pgc-dot"></span></span>
           <span class="pgc-label">命令执行失败（exit code 1）</span>
           <span class="pgc-chip">失败</span>
           <span class="pgc-time">1分15秒</span>`, `
@@ -139,12 +139,12 @@ ${strip('error', `
         </details>`)}
 ${strip('thinking', `
           <span class="pgc-step">第 2 步</span>
-          <span class="pgc-dot" aria-hidden="true"></span>
+          <span class="pgc-loader" aria-hidden="true"><span class="pgc-dot"></span><span class="pgc-dot"></span><span class="pgc-dot"></span></span>
           <span class="pgc-text"><span class="pgc-label">翻一下配置文件</span></span>
           <span class="pgc-flavor">酝酿中</span>`)}
 ${strip('thinking', `
           <span class="pgc-step">第 6 步</span>
-          <span class="pgc-dot" aria-hidden="true"></span>
+          <span class="pgc-loader" aria-hidden="true"><span class="pgc-dot"></span><span class="pgc-dot"></span><span class="pgc-dot"></span></span>
           <span class="pgc-text">
             <span class="pgc-label">看看配置里怎么写的</span>
             <span class="pgc-sub">先看 package.json 的入口，再决定改哪里</span>
@@ -153,7 +153,7 @@ ${strip('thinking', `
           <span class="pgc-flavor">盘算中</span>`, '', 2)}
 ${strip('thinking', `
           <span class="pgc-step">第 7 步</span>
-          <span class="pgc-dot" aria-hidden="true"></span>
+          <span class="pgc-loader" aria-hidden="true"><span class="pgc-dot"></span><span class="pgc-dot"></span><span class="pgc-dot"></span></span>
           <span class="pgc-text"><span class="pgc-label">npm test 跑完了 · 1.2s</span></span>
           <span class="pgc-flavor">缓口气</span>`)}
       <div class="pgc-summary"><span class="pgc-summary-text">本回合 · 3 次工具 · 2 成 1 败 · 用时 12.4s</span></div>

@@ -117,13 +117,19 @@ v4.1-flash 这类模型思考极快，字是一串串来的。如果字幕逐字
 
 | 选项 | 表现 |
 | --- | --- |
-| 安静（默认） | 左侧小圆点极轻地呼吸——只有光晕大小在变，透明度不动，所以不会「闪」 |
-| 扫光 | 一道渐变扫过主文案，2.2 秒一轮，只动 `background-position`，不推挤布局 |
-| 全静止 | 什么都不动 |
+| 安静（默认） | 左侧三颗小圆点依次轻轻呼吸——只有光晕大小在变，透明度与位移都不动，所以不会「闪」 |
+| 扫光 | 三颗点排着队起跳 + 一道渐变扫过主文案，只动 `transform` / `background-position`，不推挤布局 |
+| 全静止 | 什么都不动，只留一颗点当句号 |
 
-为什么默认是「安静」：思考时文字本来就在飞快地长，字幕条再跟着流光，两个动的东西叠在一起
-就是「一直在闪」。默认档只让一个 7px 的小圆点做极缓慢的光晕呼吸，主文案是静止的。
-成功 / 失败时圆点会停住并换成绿 / 红。
+为什么默认是「安静」：思考时文字本来就在飞快地长，字幕条再跟着流光、再跟着跳，两个动的东西
+叠在一起就是「一直在闪」。默认档只让三颗 4px 的点做极缓慢的光晕呼吸，主文案是静止的。
+成功 / 失败时点会停住并换成绿 / 红。
+
+三颗点仿的是 Claude 主题插件 `dsh-claude-style` 的 await loader（见
+`node_modules/dsh-claude-style/lib/client.js` 的 `.dsh-claude-chat-wait-dot`）：容器
+`.pgc-loader` 总宽写死 16px，三颗点在 `nth-child` 上用负延迟（`-.6s` / `-.3s`）错开相位，
+`@keyframes pgc-hop` 只改 `transform: translateY(...) scaleY(...)`——起点先压扁一点（squash）
+再弹起，这就是它看起来「软」而不是机械上下跳的原因。总宽固定，所以跳起来也不会推动右侧文案。
 
 **宽度与不闪的三条硬规矩**（`client.js` 的 CSS 段）：
 
@@ -159,8 +165,12 @@ v4.1-flash 这类模型思考极快，字是一串串来的。如果字幕逐字
   [`animate` skill](https://github.com/emilkowalski/skills/blob/main/skills/animate/SKILL.md) 里推荐的强 ease-out
   `cubic-bezier(.23,1,.32,1)`（原文还专门提醒：别因为 `cubic-bezier(.4,0,.2,1)` 眼熟就一直用它，
   它是所有「AI 味」界面的默认值）。UI 动画时长一律 ≤300ms，本插件落在 160–260ms。
-- 状态点默认做「光晕呼吸」（`pgc-breathe`，2.6s，只改 `box-shadow` 扩散半径，透明度不动）；
+- 状态点默认做「呼吸」（`pgc-breathe`，2.6s，只改 `box-shadow` 扩散半径，透明度不动）；
+  扫光档才换成三点排队起跳（`pgc-hop`，`.9s`，只改 `transform`）；
   颜色从「进行中」翻到「成功 / 失败」是 `.26s` 渐变过去的，不是啪一下换色。
+- 三点 loader 的错相位写法参考 `dsh-claude-style` 的 `.dsh-claude-chat-wait-dot`
+  （`node_modules/dsh-claude-style/lib/client.js`）：负 `animation-delay` + `transform-origin: 50% 100%`
+  + 起跳前 `scale(1.7, .25)` 压扁再弹，视觉上比匀速上下移动更像有重量的东西。
 - 官方「思考中」的文字流光由 `@deepseek-ai/dsh-client-ui-primitives` 的 `TextShimmer` 组件实现，
   那是文字级 shimmer、依赖该包内部的渐变遮罩，本插件没复用（该包未解包，无法逐行核对）——**待验证**。
 - 参考来源（除上面那条）：官方入场 `.12s ease-out` 与 `.14s cubic-bezier(.2,.8,.2,1)` 见

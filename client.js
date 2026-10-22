@@ -1426,7 +1426,13 @@ window.__ModuleLoader__.load({
               painted.step !== null
                 ? h('span', { className: 'pgc-step' }, fmt(t('step'), { n: painted.step }))
                 : null,
-              h('span', { className: 'pgc-dot', 'aria-hidden': true }),
+              // 三个小点排队跳：借的是 dsh-claude-style 的 bounce 轨道
+              // （三颗 4px 圆点，同一个 keyframes，靠 nth-child 错开负的 animation-delay）。
+              // 只动 transform / opacity，不改宽高，所以不会推挤右边的主文案。
+              h('span', { className: 'pgc-loader', 'aria-hidden': true },
+                h('span', { className: 'pgc-dot' }),
+                h('span', { className: 'pgc-dot' }),
+                h('span', { className: 'pgc-dot' })),
               // 加 key 让「换文案」重挂载一次，淡入才会重播；label 已经被 holdMs
               // 稳定过（最快 350ms / 快思考 800ms 才换一次），比 160ms 的动画长，不会连成闪烁。
               h('span', { className: 'pgc-text' },
@@ -1576,26 +1582,26 @@ window.__ModuleLoader__.load({
 .pgc-step { flex: 0 0 auto; font-variant-numeric: tabular-nums; font-weight: 600; color: var(--pgc-accent); }
 .pgc-strip--ok .pgc-step { color: var(--pgc-ok); }
 .pgc-strip--error .pgc-step { color: var(--pgc-bad); }
+/* 三个 4px 小点。宽度总和固定 16px，不管动画怎么跳都不推动右边的主文案。
+   做法参考 dsh-claude-style 的等待行：三颗点是同一条 keyframes，
+   靠 nth-child 的负 animation-delay 错开相位，看起来像排队跳，而不是整排一起闪。 */
+.pgc-loader { flex: 0 0 auto; display: inline-flex; align-items: flex-end; gap: 2px; width: 16px; height: 7px; }
 .pgc-dot {
-  flex: 0 0 auto; width: 7px; height: 7px; border-radius: 50%;
+  width: 4px; height: 4px; border-radius: 50%;
   background: var(--pgc-accent);
-  box-shadow: 0 0 0 3px color-mix(in srgb, var(--pgc-accent) 18%, transparent);
+  transform-origin: 50% 100%;
   /* 状态从「进行中」翻到「成功 / 失败」时，颜色是渐过去的，不是啪一下换掉。 */
-  transition: background-color .26s cubic-bezier(.23, 1, .32, 1),
-              box-shadow .26s cubic-bezier(.23, 1, .32, 1);
+  transition: background-color .26s cubic-bezier(.23, 1, .32, 1);
 }
-/* 默认「安静」档：小圆点只做极轻的呼吸（光晕大小变化，不改透明度，所以不会闪）。
-   扫光档才额外给文字加流光；全静止档什么都不动。 */
-.pgc-anim-calm .pgc-dot,
-.pgc-anim-sweep .pgc-dot { animation: pgc-breathe 2.6s ease-in-out infinite; }
-.pgc-strip--ok .pgc-dot {
-  background: var(--pgc-ok); animation: none;
-  box-shadow: 0 0 0 3px color-mix(in srgb, var(--pgc-ok) 18%, transparent);
-}
-.pgc-strip--error .pgc-dot {
-  background: var(--pgc-bad); animation: none;
-  box-shadow: 0 0 0 3px color-mix(in srgb, var(--pgc-bad) 18%, transparent);
-}
+/* 安静档（默认）：三颗点只做极轻的呼吸，动的是光晕大小，不动位移、不动透明度，
+   所以看着是「它还活着」，而不是「在闪」。 */
+.pgc-anim-calm .pgc-dot { animation: pgc-breathe 2.6s ease-in-out infinite; }
+/* 扫光档：三颗点排队跳起来（0.9s 一轮，相位差 0.3s），配合文字的流光。 */
+.pgc-anim-sweep .pgc-dot { animation: pgc-hop .9s cubic-bezier(.37, 0, .63, 1) infinite; }
+.pgc-anim-sweep .pgc-dot:nth-child(2) { animation-delay: -.6s; }
+.pgc-anim-sweep .pgc-dot:nth-child(3) { animation-delay: -.3s; }
+.pgc-strip--ok .pgc-dot { background: var(--pgc-ok); animation: none; transform: none; opacity: 1; }
+.pgc-strip--error .pgc-dot { background: var(--pgc-bad); animation: none; transform: none; opacity: 1; }
 /* 主文案：一行放不下就省略号，别缩成俩字。
    不再按「行数 2/3」加 line-clamp——主文案是拼出来的整句（十几个字），
    开 2/3 行几乎不会真的折行，视觉上没差别，所以那个设置项已经删了。 */
@@ -1736,6 +1742,8 @@ window.__ModuleLoader__.load({
 .pgc-switch[data-on='true'] .pgc-switch-thumb { transform: translateX(12px); }
 .pgc-switch[data-on='true'] .pgc-switch-label { color: var(--dsw-alias-label-primary, currentColor); }
 .pgc-anim-off .pgc-dot { animation: none; opacity: .45; }
+/* 全静止档：三颗点里只留一颗，看着像「句号」而不是「排了一半的点」。 */
+.pgc-anim-off .pgc-dot:nth-child(2), .pgc-anim-off .pgc-dot:nth-child(3) { display: none; }
 .pgc-anim-off .pgc-label::after { content: none; animation: none; }
 /* 「全静止」档真的全静止：入场、换文案、换词都不动，只剩底色过渡（那不算动效）。 */
 .pgc-anim-off .pgc-live, .pgc-anim-off .pgc-label, .pgc-anim-off .pgc-flavor { animation: none; }
@@ -1759,6 +1767,11 @@ window.__ModuleLoader__.load({
 @keyframes pgc-breathe {
   0%, 100% { box-shadow: 0 0 0 2px color-mix(in srgb, var(--pgc-accent) 22%, transparent); }
   50% { box-shadow: 0 0 0 5px color-mix(in srgb, var(--pgc-accent) 6%, transparent); }
+}
+/* 扫光档的三点起跳：只动 transform（合成层），不改宽高、不重排。 */
+@keyframes pgc-hop {
+  0%, 60%, 100% { transform: translateY(0) scaleY(1); }
+  30% { transform: translateY(-3px) scaleY(1.15); }
 }
 @keyframes pgc-sweep { 0% { background-position: 120% 0; } 100% { background-position: -60% 0; } }
 `;
