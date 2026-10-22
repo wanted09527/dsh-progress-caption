@@ -1446,11 +1446,17 @@ window.__ModuleLoader__.load({
               status && (!suffix || painted.state === 'ok' || painted.state === 'error')
                 ? h('span', { className: 'pgc-chip' }, status)
                 : null,
-              // 不到 1 秒不显示耗时：刚切过来就挂个「0.0s」，像坏了一样。
-              // 数字宽度用 tabular-nums + 固定 min-width 锁住，每秒跳动不会推动别人。
-              painted.elapsedMs !== null && painted.elapsedMs >= 1000
-                ? h('span', { className: 'pgc-time' }, durationText(painted.elapsedMs))
-                : null,
+              // 这里原来是耗时（`pgc-time`），已移除：那个数字和思维链区域的时间重复，
+              // 而且每秒跳一次还容易抢注意力。位置留给下面的循环动画占位（见下）。
+              // 【预留位】俏皮词左侧的循环动画（具体形式待补充：类 Claude 加载动画 / Windows 转圈）。
+              // 现在只留外壳和固定宽度的占位，什么都不画；以后把动画节点塞进这个 span 即可。
+              // 宽高已经写死在 .pgc-slot 上，所以加动画不会让左右两边重新排版。
+              // 不能删：删掉后「状态胶囊 → 俏皮词」的间距会变，看着像排版塌了。
+              h('span', {
+                className: 'pgc-slot',
+                'data-pgc-slot': 'loop',
+                'aria-hidden': true,
+              }),
               // 俏皮词放最右端：它只是气氛，不属于左边那句状态描述。
               suffix ? h('span', { className: 'pgc-flavor', key: suffix }, suffix) : null)
             : null,
@@ -1651,7 +1657,13 @@ window.__ModuleLoader__.load({
 .pgc-chip { flex: 0 0 auto; padding: 0 6px; border: 1px solid color-mix(in srgb, var(--pgc-accent) 38%, transparent); border-radius: 999px; font-size: 11px; color: var(--pgc-accent); }
 .pgc-strip--ok .pgc-chip { color: var(--pgc-ok); border-color: color-mix(in srgb, var(--pgc-ok) 48%, transparent); }
 .pgc-strip--error .pgc-chip { color: var(--pgc-bad); border-color: color-mix(in srgb, var(--pgc-bad) 52%, transparent); }
-.pgc-time { flex: 0 0 auto; min-width: 3.6em; text-align: right; font-variant-numeric: tabular-nums; color: var(--dsw-alias-label-secondary, inherit); opacity: .9; }
+/* 【预留位】原来这里放的是耗时（.pgc-time，已移除：和思维链区域的时间重复）。
+   现在留一个空的、宽度固定的盒子，什么都不画，只占住这块地：
+   - 宽度 3.6em 就是原来耗时最小占的宽度，所以右边俏皮词的位置跟以前一致；
+   - 以后把循环动画（形式待补充：类 Claude 加载动画 / Windows 转圈）塞进来，
+     因为盒子宽高已写死，动画怎么转都不会把左右两边挤动。 */
+.pgc-slot { flex: 0 0 auto; width: 3.6em; height: 1em; }
+.pgc-slot:empty { display: inline-block; }
 .pgc-strip--handle { padding: 0 10px 2px; background: transparent; border-color: transparent; justify-content: flex-end; }
 /* 状态已经结束、只是还没挂满最短停留时间：保持不透明，靠收起动画收，不要再压暗一次（压暗会被看成闪）。 */
 .pgc-strip--held { opacity: 1; }
