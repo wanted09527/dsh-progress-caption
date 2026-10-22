@@ -26,6 +26,7 @@ const sheet = (open) => `
             <button type="button" class="pgc-sheet-close" aria-label="关闭">✕</button>
           </div>
           <div class="pgc-sheet-body">
+            <span class="pgc-group">长什么样</span>
             <label class="pgc-set-row"><span class="pgc-set-name">字号</span>
               <span class="pgc-seg" role="group">
                 <button type="button" class="pgc-seg-btn" data-on="false">小</button>
@@ -47,20 +48,52 @@ const sheet = (open) => `
                 <button type="button" class="pgc-seg-btn" data-on="false">关闭</button>
               </span>
             </label>
-            <span class="pgc-sheet-split"></span>
-            <label class="pgc-set-row"><span class="pgc-set-name">俏皮词</span>
+            <span class="pgc-group">颜色</span>
+            <label class="pgc-set-row"><span class="pgc-set-name">字幕条颜色</span>
+            <span class="pgc-swatches" role="group">
+              <button type="button" class="pgc-swatch pgc-swatch--auto" data-on="false" title="跟随主题">A</button>
+              <button type="button" class="pgc-swatch" data-on="true" title="海蓝" style="--pgc-sw:#4d6bfe"></button>
+              <button type="button" class="pgc-swatch" data-on="false" title="森林" style="--pgc-sw:#2f9e68"></button>
+              <button type="button" class="pgc-swatch" data-on="false" title="日落" style="--pgc-sw:#e07a3f"></button>
+              <button type="button" class="pgc-swatch" data-on="false" title="紫罗兰" style="--pgc-sw:#8b5cf6"></button>
+              <button type="button" class="pgc-swatch" data-on="false" title="玫红" style="--pgc-sw:#e0558c"></button>
+              <button type="button" class="pgc-swatch" data-on="false" title="石墨" style="--pgc-sw:#6b7280"></button>
+            </span></label>
+            <label class="pgc-set-row"><span class="pgc-set-name">跑成功时</span>
+              <span class="pgc-seg" role="group">
+                <button type="button" class="pgc-seg-btn" data-on="true">跟随主题</button>
+                <button type="button" class="pgc-seg-btn" data-on="false">翠绿</button>
+                <button type="button" class="pgc-seg-btn" data-on="false">青色</button>
+              </span>
+            </label>
+            <label class="pgc-set-row"><span class="pgc-set-name">跑失败时</span>
+              <span class="pgc-seg" role="group">
+                <button type="button" class="pgc-seg-btn" data-on="true">跟随主题</button>
+                <button type="button" class="pgc-seg-btn" data-on="false">朱红</button>
+                <button type="button" class="pgc-seg-btn" data-on="false">暖橙</button>
+              </span>
+            </label>
+            <label class="pgc-set-row"><span class="pgc-set-name">俏皮词样子</span>
+              <span class="pgc-seg" role="group">
+                <button type="button" class="pgc-seg-btn" data-on="true">淡色底</button>
+                <button type="button" class="pgc-seg-btn" data-on="false">实心</button>
+                <button type="button" class="pgc-seg-btn" data-on="false">素色</button>
+              </span>
+            </label>
+            <span class="pgc-group">说什么</span>
+            <label class="pgc-set-row"><span class="pgc-set-name">显示俏皮词</span>
               <button type="button" class="pgc-switch" role="switch" data-on="true" aria-checked="true">
                 <span class="pgc-switch-track"><span class="pgc-switch-thumb"></span></span>
                 <span class="pgc-switch-label">开</span>
               </button>
             </label>
-            <label class="pgc-set-row"><span class="pgc-set-name">字幕内容</span>
+            <label class="pgc-set-row"><span class="pgc-set-name">没线索时</span>
               <span class="pgc-seg" role="group">
-                <button type="button" class="pgc-seg-btn" data-on="false">只看工具</button>
-                <button type="button" class="pgc-seg-btn" data-on="true">也看思考</button>
+                <button type="button" class="pgc-seg-btn" data-on="false">只报动作</button>
+                <button type="button" class="pgc-seg-btn" data-on="true">猜一猜</button>
               </span>
             </label>
-            <p class="pgc-sheet-hint">选「也看思考」时，没工具在跑就从思考里猜它在干嘛；猜错很正常，别当真。</p>
+            <p class="pgc-sheet-hint">没在跑工具的时候，选「猜一猜」它会从思考内容里猜一句；猜错很正常，看看就好。</p>
             <p class="pgc-sheet-note">设置只存在这个浏览器里</p>
           </div>
         </div>

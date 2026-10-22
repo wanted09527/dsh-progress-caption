@@ -39,8 +39,6 @@ window.__ModuleLoader__.load({
     const TURN_SLOT = 'conversation.chat.turnTail';
     /** 思考文本只取末尾这么多字去匹配规则，避免长文误命中。 */
     const RULE_SAMPLE = 400;
-    /** 工具跑多久之后开始陪聊（加一个俏皮词）。 */
-    const LONG_TOOL_MS = 5000;
     /** 俏皮词轮换节奏。 */
     // 俏皮词换得太勤会像弹幕，慢一点：2.8 秒换一个。
     const WORD_MS = 2800;
@@ -269,6 +267,10 @@ window.__ModuleLoader__.load({
         sumTime: '用时 {s}',
         disclaimer: '字幕由规则推断，不代表模型真实意图',
         settings: '字幕设置',
+        groupLook: '长什么样',
+        groupColor: '颜色',
+        groupSay: '说什么',
+        preview: '预览',
         size: '字号',
         sizeS: '小',
         sizeM: '中',
@@ -278,13 +280,31 @@ window.__ModuleLoader__.load({
         animSweep: '扫光',
         animDots: '呼吸点',
         animOff: '关闭',
-        words: '俏皮词',
+        colorAccent: '字幕条颜色',
+        colorOk: '跑成功时',
+        colorBad: '跑失败时',
+        colorFlavor: '俏皮词样子',
+        toneTheme: '跟随主题',
+        toneTint: '淡色底',
+        toneSolid: '实心',
+        tonePlain: '素色',
+        swOcean: '海蓝',
+        swForest: '森林',
+        swSunset: '日落',
+        swViolet: '紫罗兰',
+        swRose: '玫红',
+        swGraphite: '石墨',
+        swGreen: '翠绿',
+        swTeal: '青色',
+        swRed: '朱红',
+        swOrange: '暖橙',
+        words: '显示俏皮词',
         wordsOn: '开',
         wordsOff: '关',
-        facts: '字幕内容',
-        factsTools: '只看工具',
-        factsThinking: '也看思考',
-        factsHint: '选「也看思考」时，没工具在跑就从思考里猜它在干嘛；猜错很正常，别当真。',
+        facts: '没线索时',
+        factsTools: '只报动作',
+        factsThinking: '猜一猜',
+        factsHint: '没在跑工具的时候，选「猜一猜」它会从思考内容里猜一句；猜错很正常，看看就好。',
         sheetNote: '设置只存在这个浏览器里',
         idleStrip: '字幕已就绪，现在没有在跑的任务',
         /* 工具 → 人话动词（运行中 / 完成），比「正在执行读取文件」这种拼接自然得多 */
@@ -331,6 +351,10 @@ window.__ModuleLoader__.load({
         sumTime: 'took {s}',
         disclaimer: 'Inferred from rules, not the model’s intent',
         settings: 'Caption settings',
+        groupLook: 'Shape',
+        groupColor: 'Colour',
+        groupSay: 'What it says',
+        preview: 'Preview',
         size: 'Text size',
         sizeS: 'Small',
         sizeM: 'Medium',
@@ -340,13 +364,31 @@ window.__ModuleLoader__.load({
         animSweep: 'Shimmer',
         animDots: 'Breathe',
         animOff: 'Off',
+        colorAccent: 'Strip',
+        colorOk: 'When it works',
+        colorBad: 'When it fails',
+        colorFlavor: 'Fun word look',
+        toneTheme: 'Theme',
+        toneTint: 'Tinted',
+        toneSolid: 'Solid',
+        tonePlain: 'Plain',
+        swOcean: 'Ocean',
+        swForest: 'Forest',
+        swSunset: 'Sunset',
+        swViolet: 'Violet',
+        swRose: 'Rose',
+        swGraphite: 'Graphite',
+        swGreen: 'Green',
+        swTeal: 'Teal',
+        swRed: 'Red',
+        swOrange: 'Amber',
         words: 'Playful words',
         wordsOn: 'On',
         wordsOff: 'Off',
-        facts: 'Caption content',
-        factsTools: 'Tools only',
-        factsThinking: 'Tools + thinking',
-        factsHint: 'With “Tools + thinking”, the caption guesses from the reasoning text when no tool is running. Guesses can be wrong.',
+        facts: 'When unsure',
+        factsTools: 'Actions only',
+        factsThinking: 'Guess a little',
+        factsHint: 'When no tool is running, “Guess a little” reads the reasoning text for a clue. Guesses can be wrong.',
         sheetNote: 'Saved in this browser only',
         idleStrip: 'Caption is ready — nothing is running right now',
         v_exec_run: 'running command',
@@ -466,9 +508,53 @@ window.__ModuleLoader__.load({
     /* ---------------- 设置：存在浏览器本地，不写 DSH 数据 ---------------- */
 
     const SETTINGS_KEY = 'dsh-progress-caption:settings';
-    const DEFAULT_SETTINGS = { size: 'm', lines: 1, anim: 'sweep', words: true, factsOnly: false };
+    const DEFAULT_SETTINGS = {
+      size: 'm', lines: 1, anim: 'sweep', words: true, factsOnly: false,
+      accent: 'theme', okColor: 'theme', badColor: 'theme', flavorStyle: 'tint',
+    };
     const SIZES = ['s', 'm', 'l'];
     const ANIMS = ['sweep', 'dots', 'off'];
+    const FLAVOR_STYLES = ['tint', 'solid', 'plain'];
+
+    /**
+     * 配色表。值直接写死成十六进制，不再依赖主题变量——主题把颜色关掉时
+     * （比如某些皮肤的「素色模式」），字幕条自己还能有颜色，不至于一片灰。
+     */
+    const ACCENTS = {
+      theme: { label: 'toneTheme', value: '' },
+      ocean: { label: 'swOcean', value: '#4d6bfe' },
+      forest: { label: 'swForest', value: '#2f9e68' },
+      sunset: { label: 'swSunset', value: '#e07a3f' },
+      violet: { label: 'swViolet', value: '#8b5cf6' },
+      rose: { label: 'swRose', value: '#e0558c' },
+      graphite: { label: 'swGraphite', value: '#6b7280' },
+    };
+    const OK_COLORS = {
+      theme: { label: 'toneTheme', value: '' },
+      green: { label: 'swGreen', value: '#2f9e68' },
+      teal: { label: 'swTeal', value: '#12a594' },
+    };
+    const BAD_COLORS = {
+      theme: { label: 'toneTheme', value: '' },
+      red: { label: 'swRed', value: '#d94a3d' },
+      orange: { label: 'swOrange', value: '#e08a2e' },
+    };
+
+    function pickFrom(table, value, fallbackKey) {
+      return table[value] ? value : fallbackKey;
+    }
+
+    /** 把选中的颜色折算成 CSS 变量，挂在字幕条根节点上。 */
+    function stripVars(settings) {
+      const accent = ACCENTS[settings.accent] || ACCENTS.theme;
+      const ok = OK_COLORS[settings.okColor] || OK_COLORS.theme;
+      const bad = BAD_COLORS[settings.badColor] || BAD_COLORS.theme;
+      const vars = {};
+      if (accent.value) vars['--pgc-accent'] = accent.value;
+      if (ok.value) vars['--pgc-ok'] = ok.value;
+      if (bad.value) vars['--pgc-bad'] = bad.value;
+      return vars;
+    }
 
     function pick(value, allowed, fallback) {
       return allowed.indexOf(value) >= 0 ? value : fallback;
@@ -483,6 +569,10 @@ window.__ModuleLoader__.load({
         anim: pick(source.anim, ANIMS, DEFAULT_SETTINGS.anim),
         words: source.words === undefined ? DEFAULT_SETTINGS.words : Boolean(source.words),
         factsOnly: source.factsOnly === undefined ? DEFAULT_SETTINGS.factsOnly : Boolean(source.factsOnly),
+        accent: pickFrom(ACCENTS, source.accent, DEFAULT_SETTINGS.accent),
+        okColor: pickFrom(OK_COLORS, source.okColor, DEFAULT_SETTINGS.okColor),
+        badColor: pickFrom(BAD_COLORS, source.badColor, DEFAULT_SETTINGS.badColor),
+        flavorStyle: pick(source.flavorStyle, FLAVOR_STYLES, DEFAULT_SETTINGS.flavorStyle),
       };
     }
 
@@ -976,11 +1066,9 @@ window.__ModuleLoader__.load({
       const fast = Boolean(seen.current) && seen.current.cps >= FAST_CPS;
       const holdMs = fast ? LABEL_HOLD_FAST_MS : LABEL_HOLD_MS;
 
-      const longTool = Boolean(view) && view.state === 'running'
-        && typeof view.elapsedMs === 'number' && view.elapsedMs >= LONG_TOOL_MS;
-      // 俏皮词不再等停顿：思考期间一直轮换（不知道说什么时就用它当主文案），长工具时陪衬。
-      const wordsOn = Boolean(settings.words) && Boolean(view)
-        && (view.state === 'thinking' || longTool);
+      // 俏皮词是常驻的：只要有字幕条就有它，不管这一刻是在思考、跑工具还是刚跑完。
+      // 位置固定在最右端，「进行中」会主动让位，所以它不会再把主文案挤扁。
+      const wordsOn = Boolean(settings.words) && Boolean(view);
       // 起点按回合错开：一百多个词轮完要三分钟，不错开的话彩蛋永远排在最后。
       const seed = Math.abs(((shown && shown.turn) || 0) * 37
         + ((partial && partial.step) || 0)) % WORD_COUNT;
@@ -1022,7 +1110,9 @@ window.__ModuleLoader__.load({
         return () => clearTimeout(timer);
       }, [candidate, label, holdMs]);
       // 有事实标签时，俏皮词退到后面当陪衬；已经拼进主文案了就别再重复一遍。
-      const suffix = wordsOn && flavor && candidate.indexOf(flavor) < 0 ? flavor : null;
+      // 事实标签在场时它一定挂着（不再看「是不是正在思考」），这样它有个固定位置，
+      // 不会一会儿出现一会儿被主文案顶掉，看起来就不会「抢位置」。
+      const suffix = settings.words && flavor && candidate.indexOf(flavor) < 0 ? flavor : null;
 
       // 成功态停留几秒就收；失败态留着，等人看完原因或开下一轮。
       const [gone, setGone] = React.useState(false);
@@ -1058,6 +1148,22 @@ window.__ModuleLoader__.load({
         'aria-pressed': option.value === value ? 'true' : 'false',
         onClick: () => onChange(option.value),
       }, t(option.label))));
+
+      // 颜色选择：色块按钮，比下拉直观；「跟随主题」用一个小圆环表示。
+      const swatches = (name, value, table, onChange) => h('span', {
+        className: 'pgc-swatches',
+        role: 'group',
+        'aria-label': t('colorAccent'),
+      }, Object.keys(table).map((key) => h('button', {
+        type: 'button',
+        key,
+        className: 'pgc-swatch' + (table[key].value ? '' : ' pgc-swatch--auto'),
+        'data-on': key === value ? 'true' : 'false',
+        'aria-pressed': key === value ? 'true' : 'false',
+        title: t(table[key].label),
+        style: table[key].value ? { '--pgc-sw': table[key].value } : undefined,
+        onClick: () => onChange(key),
+      }, table[key].value ? '' : 'A')));
 
       const switchButton = (on, label, hint, flip) => h('button', {
         type: 'button',
@@ -1096,6 +1202,7 @@ window.__ModuleLoader__.load({
               onClick: () => setSettingsOpen(false),
             }, '✕')),
           h('div', { className: 'pgc-sheet-body' },
+            h('span', { className: 'pgc-group' }, t('groupLook')),
             settingRow(t, 'size', seg('size', settings.size, [
               { value: 's', label: 'sizeS' },
               { value: 'm', label: 'sizeM' },
@@ -1111,7 +1218,24 @@ window.__ModuleLoader__.load({
               { value: 'dots', label: 'animDots' },
               { value: 'off', label: 'animOff' },
             ], (value) => update({ anim: value }))),
-            h('span', { className: 'pgc-sheet-split' }),
+            h('span', { className: 'pgc-group' }, t('groupColor')),
+            settingRow(t, 'colorAccent', swatches('accent', settings.accent, ACCENTS, (value) => update({ accent: value }))),
+            settingRow(t, 'colorOk', seg('okColor', settings.okColor, [
+              { value: 'theme', label: 'toneTheme' },
+              { value: 'green', label: 'swGreen' },
+              { value: 'teal', label: 'swTeal' },
+            ], (value) => update({ okColor: value }))),
+            settingRow(t, 'colorBad', seg('badColor', settings.badColor, [
+              { value: 'theme', label: 'toneTheme' },
+              { value: 'red', label: 'swRed' },
+              { value: 'orange', label: 'swOrange' },
+            ], (value) => update({ badColor: value }))),
+            settingRow(t, 'colorFlavor', seg('flavorStyle', settings.flavorStyle, [
+              { value: 'tint', label: 'toneTint' },
+              { value: 'solid', label: 'toneSolid' },
+              { value: 'plain', label: 'tonePlain' },
+            ], (value) => update({ flavorStyle: value }))),
+            h('span', { className: 'pgc-group' }, t('groupSay')),
             settingRow(t, 'words', switchButton(settings.words, settings.words ? t('wordsOn') : t('wordsOff'), '', () => update({ words: !settings.words }))),
             settingRow(t, 'facts', seg('facts', settings.factsOnly ? 'tools' : 'thinking', [
               { value: 'tools', label: 'factsTools' },
@@ -1136,12 +1260,16 @@ window.__ModuleLoader__.load({
         'pgc-size-' + settings.size,
         'pgc-lines-' + settings.lines,
         'pgc-anim-' + settings.anim,
+        'pgc-flavor-' + settings.flavorStyle,
       ].filter(Boolean).join(' ');
+
+      const colorVars = stripVars(settings);
 
       return h('div', {
         className: stripClass,
         'data-plugin': 'dsh-progress-caption',
         title: t('disclaimer'),
+        style: Object.keys(colorVars).length > 0 ? colorVars : undefined,
       },
         // 朗读区域只包状态文字：设置面板不在里面，免得切换时被一起念出来。
         h('span', { className: 'pgc-live', role: 'status', 'aria-live': 'polite' },
@@ -1156,8 +1284,11 @@ window.__ModuleLoader__.load({
             settings.lines >= 2 && shown.state === 'thinking' && shown.sub
               ? h('span', { className: 'pgc-sub' }, shown.sub)
               : null),
-          // 状态胶囊和俏皮词是两回事：有俏皮词时就把「进行中」收起来，别两个胶囊挤一起。
-          status && !suffix ? h('span', { className: 'pgc-chip' }, status) : null,
+          // 俏皮词在场时，不再重复挂「进行中」——两个都在就互相挤，主文案被压成两三个字。
+          // 进行中由左侧小圆点表达；「成功 / 失败」是结论，任何时候都留着。
+          status && (!suffix || shown.state === 'ok' || shown.state === 'error')
+            ? h('span', { className: 'pgc-chip' }, status)
+            : null,
           // 不到 1 秒不显示耗时：刚切过来就挂个「0.0s」，像坏了一样。
           shown.elapsedMs !== null && shown.elapsedMs >= 1000
             ? h('span', { className: 'pgc-time' }, durationText(shown.elapsedMs))
@@ -1239,37 +1370,41 @@ window.__ModuleLoader__.load({
      * 动画只碰 opacity / transform / background-position，绝不改宽高，避免推挤布局。
      * ------------------------------------------------------------------ */
     const CSS = `
+/* 自定义配色走这三个变量；没选（跟随主题）时自动退回 DSH 主题色。 */
 .pgc-strip {
+  --pgc-accent: var(--dsw-alias-brand-primary, #4d6bfe);
+  --pgc-ok: var(--dsw-alias-state-success-primary, #2f9e68);
+  --pgc-bad: var(--dsw-alias-state-error-primary, #d94a3d);
   display: flex; align-items: center; gap: 8px; box-sizing: border-box;
   margin: 0 12px 6px; padding: 5px 10px; border-radius: 10px;
-  border: 1px solid color-mix(in srgb, var(--dsw-alias-brand-primary, #4d6bfe) 20%, transparent);
-  background: color-mix(in srgb, var(--dsw-alias-brand-primary, #4d6bfe) 8%, transparent);
+  border: 1px solid color-mix(in srgb, var(--pgc-accent) 20%, transparent);
+  background: color-mix(in srgb, var(--pgc-accent) 8%, transparent);
   line-height: 1.4; color: var(--dsw-alias-label-primary, inherit);
   transition: background-color .2s ease, border-color .2s ease, opacity .18s ease;
 }
 /* DeepSeek 蓝是主色；成功/失败只换强调色，形状和排版保持一致。 */
-.pgc-strip--ok { border-color: color-mix(in srgb, var(--dsw-alias-state-success-primary, #2f9e68) 24%, transparent); background: color-mix(in srgb, var(--dsw-alias-state-success-primary, #2f9e68) 8%, transparent); }
-.pgc-strip--error { border-color: color-mix(in srgb, var(--dsw-alias-state-error-primary, #d94a3d) 28%, transparent); background: color-mix(in srgb, var(--dsw-alias-state-error-primary, #d94a3d) 9%, transparent); }
+.pgc-strip--ok { border-color: color-mix(in srgb, var(--pgc-ok) 24%, transparent); background: color-mix(in srgb, var(--pgc-ok) 8%, transparent); }
+.pgc-strip--error { border-color: color-mix(in srgb, var(--pgc-bad) 28%, transparent); background: color-mix(in srgb, var(--pgc-bad) 9%, transparent); }
 .pgc-live { display: flex; align-items: center; gap: 7px; min-width: 0; flex: 1 1 auto; }
 .pgc-size-s { font-size: 11px; }
 .pgc-size-m { font-size: 12px; }
 .pgc-size-l { font-size: 13.5px; }
-.pgc-step { flex: 0 0 auto; font-variant-numeric: tabular-nums; font-weight: 600; color: var(--dsw-alias-brand-primary, #4d6bfe); }
-.pgc-strip--ok .pgc-step { color: var(--dsw-alias-state-success-primary, #2f9e68); }
-.pgc-strip--error .pgc-step { color: var(--dsw-alias-state-error-primary, #d94a3d); }
+.pgc-step { flex: 0 0 auto; font-variant-numeric: tabular-nums; font-weight: 600; color: var(--pgc-accent); }
+.pgc-strip--ok .pgc-step { color: var(--pgc-ok); }
+.pgc-strip--error .pgc-step { color: var(--pgc-bad); }
 .pgc-dot {
   flex: 0 0 auto; width: 7px; height: 7px; border-radius: 50%;
-  background: var(--dsw-alias-brand-primary, #4d6bfe);
-  box-shadow: 0 0 0 3px color-mix(in srgb, var(--dsw-alias-brand-primary, #4d6bfe) 18%, transparent);
+  background: var(--pgc-accent);
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--pgc-accent) 18%, transparent);
   animation: pgc-pulse 1.6s ease-in-out infinite;
 }
 .pgc-strip--ok .pgc-dot {
-  background: var(--dsw-alias-state-success-primary, #2f9e68); animation: none;
-  box-shadow: 0 0 0 3px color-mix(in srgb, var(--dsw-alias-state-success-primary, #2f9e68) 18%, transparent);
+  background: var(--pgc-ok); animation: none;
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--pgc-ok) 18%, transparent);
 }
 .pgc-strip--error .pgc-dot {
-  background: var(--dsw-alias-state-error-primary, #d94a3d); animation: none;
-  box-shadow: 0 0 0 3px color-mix(in srgb, var(--dsw-alias-state-error-primary, #d94a3d) 18%, transparent);
+  background: var(--pgc-bad); animation: none;
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--pgc-bad) 18%, transparent);
 }
 /* 主文案：一行放不下就省略号，别缩成俩字。 */
 .pgc-text { display: flex; flex-direction: column; justify-content: center; flex: 1 1 auto; min-width: 0; }
@@ -1277,29 +1412,38 @@ window.__ModuleLoader__.load({
 .pgc-label { position: relative; flex: 0 0 auto; min-width: 0; overflow: hidden; display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 1; overflow-wrap: anywhere; }
 .pgc-lines-2 .pgc-label { -webkit-line-clamp: 2; }
 .pgc-lines-3 .pgc-label { -webkit-line-clamp: 3; }
-.pgc-anim-sweep .pgc-label::after { content: ''; position: absolute; inset: 0; pointer-events: none; background-image: linear-gradient(100deg, transparent 38%, color-mix(in srgb, var(--dsw-alias-brand-primary, #4d6bfe) 28%, transparent) 50%, transparent 62%); background-size: 260% 100%; background-repeat: no-repeat; animation: pgc-sweep 2.2s linear infinite; }
-/* 俏皮词：不用斜体（中文被强行倾斜很难看），改成品牌色胶囊，白字底 + 实心字，一眼能看见。 */
+.pgc-anim-sweep .pgc-label::after { content: ''; position: absolute; inset: 0; pointer-events: none; background-image: linear-gradient(100deg, transparent 38%, color-mix(in srgb, var(--pgc-accent) 28%, transparent) 50%, transparent 62%); background-size: 260% 100%; background-repeat: no-repeat; animation: pgc-sweep 2.2s linear infinite; }
+/* 俏皮词：不用斜体（中文被强行倾斜很难看），固定占最右一格，宽度稳、不跟主文案抢。 */
 .pgc-flavor {
-  flex: 0 0 auto; max-width: 46%; margin-left: 6px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+  flex: 0 0 auto; min-width: 5.5em; max-width: 46%; margin-left: 6px;
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap; text-align: center;
   font-style: normal; font-weight: 600; font-size: .95em; line-height: 1.6; letter-spacing: .2px;
-  color: var(--dsw-alias-brand-primary, #4d6bfe);
-  background: color-mix(in srgb, var(--dsw-alias-brand-primary, #4d6bfe) 15%, transparent);
-  border: 1px solid color-mix(in srgb, var(--dsw-alias-brand-primary, #4d6bfe) 30%, transparent);
+  color: var(--pgc-accent);
+  background: color-mix(in srgb, var(--pgc-accent) 15%, transparent);
+  border: 1px solid color-mix(in srgb, var(--pgc-accent) 30%, transparent);
   border-radius: 999px; padding: 0 9px;
+  transition: color .18s ease, background-color .18s ease, border-color .18s ease;
 }
+/* 俏皮词三种样式：淡色底（默认）/ 实心 / 素色（不要底色，只留字）。 */
+.pgc-flavor-solid .pgc-flavor { color: #fff; background: var(--pgc-accent); border-color: transparent; }
+.pgc-flavor-plain .pgc-flavor { color: var(--pgc-accent); background: transparent; border-color: transparent; opacity: .92; }
 .pgc-strip--ok .pgc-flavor {
-  color: var(--dsw-alias-state-success-primary, #2f9e68);
-  background: color-mix(in srgb, var(--dsw-alias-state-success-primary, #2f9e68) 15%, transparent);
-  border-color: color-mix(in srgb, var(--dsw-alias-state-success-primary, #2f9e68) 30%, transparent);
+  color: var(--pgc-ok);
+  background: color-mix(in srgb, var(--pgc-ok) 15%, transparent);
+  border-color: color-mix(in srgb, var(--pgc-ok) 30%, transparent);
 }
 .pgc-strip--error .pgc-flavor {
-  color: var(--dsw-alias-state-error-primary, #d94a3d);
-  background: color-mix(in srgb, var(--dsw-alias-state-error-primary, #d94a3d) 15%, transparent);
-  border-color: color-mix(in srgb, var(--dsw-alias-state-error-primary, #d94a3d) 30%, transparent);
+  color: var(--pgc-bad);
+  background: color-mix(in srgb, var(--pgc-bad) 15%, transparent);
+  border-color: color-mix(in srgb, var(--pgc-bad) 30%, transparent);
 }
-.pgc-chip { flex: 0 0 auto; padding: 0 6px; border: 1px solid color-mix(in srgb, var(--dsw-alias-brand-primary, #4d6bfe) 38%, transparent); border-radius: 999px; font-size: 11px; color: var(--dsw-alias-brand-primary, #4d6bfe); }
-.pgc-strip--ok .pgc-chip { color: var(--dsw-alias-state-success-primary, #2f9e68); border-color: color-mix(in srgb, var(--dsw-alias-state-success-primary, #2f9e68) 48%, transparent); }
-.pgc-strip--error .pgc-chip { color: var(--dsw-alias-state-error-primary, #d94a3d); border-color: color-mix(in srgb, var(--dsw-alias-state-error-primary, #d94a3d) 52%, transparent); }
+.pgc-flavor-solid.pgc-strip--ok .pgc-flavor { color: #fff; background: var(--pgc-ok); border-color: transparent; }
+.pgc-flavor-solid.pgc-strip--error .pgc-flavor { color: #fff; background: var(--pgc-bad); border-color: transparent; }
+.pgc-flavor-plain.pgc-strip--ok .pgc-flavor { background: transparent; border-color: transparent; }
+.pgc-flavor-plain.pgc-strip--error .pgc-flavor { background: transparent; border-color: transparent; }
+.pgc-chip { flex: 0 0 auto; padding: 0 6px; border: 1px solid color-mix(in srgb, var(--pgc-accent) 38%, transparent); border-radius: 999px; font-size: 11px; color: var(--pgc-accent); }
+.pgc-strip--ok .pgc-chip { color: var(--pgc-ok); border-color: color-mix(in srgb, var(--pgc-ok) 48%, transparent); }
+.pgc-strip--error .pgc-chip { color: var(--pgc-bad); border-color: color-mix(in srgb, var(--pgc-bad) 52%, transparent); }
 .pgc-time { flex: 0 0 auto; font-variant-numeric: tabular-nums; color: var(--dsw-alias-label-secondary, inherit); opacity: .9; }
 .pgc-strip--handle { margin: 0; padding: 0 14px 2px; background: transparent; border-color: transparent; justify-content: flex-end; }
 /* 状态已经结束、只是还没挂满最短停留时间：稍微淡一点，表示它马上收。 */
@@ -1324,8 +1468,9 @@ window.__ModuleLoader__.load({
 .pgc-gear[aria-expanded='true'] { color: #fff; background: var(--dsw-alias-brand-primary, #4f7cff); }
 .pgc-sheet {
   position: absolute; right: 0; bottom: calc(100% + 8px); z-index: 40;
-  width: 246px; box-sizing: border-box; padding: 12px 12px 10px;
-  display: flex; flex-direction: column; gap: 10px;
+  width: 300px; box-sizing: border-box; padding: 14px 14px 12px;
+  display: flex; flex-direction: column; gap: 11px;
+  max-height: min(76vh, 560px); overflow-y: auto;
   border-radius: 16px; border: 1px solid var(--dsw-alias-border-l1, rgba(127,127,127,.28));
   background: var(--dsw-alias-bg-overlay, Canvas); color: var(--dsw-alias-label-primary, currentColor);
   box-shadow: 0 28px 56px -28px rgba(0,0,0,.5), 0 10px 24px -18px rgba(0,0,0,.4);
@@ -1344,7 +1489,28 @@ window.__ModuleLoader__.load({
   transition: background-color .18s ease, color .18s ease;
 }
 .pgc-sheet-close:hover { color: var(--dsw-alias-label-primary, currentColor); background: color-mix(in srgb, currentColor 10%, transparent); }
-.pgc-sheet-body { display: grid; gap: 9px; }
+.pgc-sheet-body { display: grid; gap: 8px; }
+/* 分组标题做成一条细分隔线 + 小标签，视觉上把面板切成几段，不用数行。 */
+.pgc-group {
+  display: flex; align-items: center; gap: 8px; margin-top: 4px;
+  font-size: 10.5px; font-weight: 600; letter-spacing: .04em;
+  color: var(--dsw-alias-label-secondary, inherit); opacity: .75;
+}
+.pgc-group::after { content: ''; flex: 1; height: 1px; background: var(--dsw-alias-border-l1, rgba(127,127,127,.22)); }
+.pgc-group:first-child { margin-top: 0; }
+/* 色板：一排小圆点，选中的加一圈描边。 */
+.pgc-swatches { display: flex; flex-wrap: wrap; gap: 6px; margin: 0 0 2px; }
+.pgc-swatch {
+  position: relative; width: 20px; height: 20px; padding: 0; border-radius: 999px;
+  border: 1px solid color-mix(in srgb, #000 18%, transparent);
+  background: var(--pgc-sw, transparent); color: #fff; font: inherit; font-size: 9px; line-height: 1;
+  display: grid; place-items: center; cursor: pointer;
+  transition: transform .16s ease, box-shadow .16s ease;
+}
+.pgc-swatch:hover { transform: scale(1.12); }
+.pgc-swatch[data-on='true'] { box-shadow: 0 0 0 2px var(--dsw-alias-bg-overlay, Canvas), 0 0 0 4px var(--pgc-sw, currentColor); }
+.pgc-swatch--auto { background: transparent; color: var(--dsw-alias-label-secondary, currentColor); border-style: dashed; font-size: 10px; }
+.pgc-swatch--auto[data-on='true'] { background: color-mix(in srgb, currentColor 12%, transparent); }
 .pgc-sheet-split { display: block; height: 1px; margin: 1px 0; background: var(--dsw-alias-border-l1, rgba(127,127,127,.24)); }
 .pgc-sheet-note { margin: 0; font-size: 10px; line-height: 1.45; opacity: .55; }
 .pgc-sheet-hint { margin: 2px 0 4px; font-size: 10.5px; line-height: 1.55; color: var(--dsw-alias-label-secondary, inherit); opacity: .8; }
@@ -1428,6 +1594,10 @@ window.__ModuleLoader__.load({
         readSettings,
         writeSettings,
         normalizeSettings,
+        stripVars,
+        ACCENTS,
+        OK_COLORS,
+        BAD_COLORS,
         DEFAULT_SETTINGS,
         WORD_COUNT,
         RULES,

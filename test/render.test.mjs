@@ -160,7 +160,7 @@ test('没在跑的时候只剩一个小齿轮，不占地方', () => {
   assert.doesNotMatch(shown, /正在执行/);
 });
 
-test('状态一：工具在跑 → 第 N 步 / 正在执行命令 / 进行中 / 耗时', () => {
+test('状态一：工具在跑 → 第 N 步 / 正在执行命令 / 耗时（进行中由圆点表达）', () => {
   const view = render({
     partial: { turn: 1, step: 2, blocks: [{ kind: 'reasoning', text: '跑一下命令' }] },
     runningCalls: [{ callId: 'c1', name: 'bash', step: 2, time: Date.now() - 1200 }],
@@ -169,7 +169,6 @@ test('状态一：工具在跑 → 第 N 步 / 正在执行命令 / 进行中 / 
   const shown = text(view);
   assert.match(shown, /第 3 步/);
   assert.match(shown, /正在执行命令/);
-  assert.match(shown, /进行中/);
   assert.match(shown, /\d+\.\ds/);
   assert.match(view.props.title, /规则推断/);
   assert.match(view.props.className, /pgc-strip--running/);
@@ -306,15 +305,79 @@ test('设置：坏值一律兜底回默认', () => {
   assert.deepEqual(__test.normalizeSettings(null), __test.DEFAULT_SETTINGS);
   assert.deepEqual(__test.normalizeSettings({ size: 'xxl', lines: 9, anim: 'boom', words: 'yes' }), {
     size: 'm', lines: 1, anim: 'sweep', words: true, factsOnly: false,
+    accent: 'theme', okColor: 'theme', badColor: 'theme', flavorStyle: 'tint',
   });
   assert.deepEqual(__test.normalizeSettings({ size: 'l', lines: 3, anim: 'off', words: false, factsOnly: true }), {
     size: 'l', lines: 3, anim: 'off', words: false, factsOnly: true,
+    accent: 'theme', okColor: 'theme', badColor: 'theme', flavorStyle: 'tint',
   });
 });
 
 test('设置：没有 localStorage 也不崩', () => {
   assert.deepEqual(__test.readSettings(), __test.DEFAULT_SETTINGS);
   assert.doesNotThrow(() => __test.writeSettings({ size: 's', lines: 2, anim: 'dots', words: false }));
+});
+
+test('配色：选了色就挂 CSS 变量，跟随主题时一个都不挂', () => {
+  // 跟随主题：不注入变量，CSS 会自己退回 --dsw-alias-* 主题色
+  assert.deepEqual(__test.stripVars({ accent: 'theme', okColor: 'theme', badColor: 'theme' }), {});
+  const vars = __test.stripVars({ accent: 'forest', okColor: 'green', badColor: 'red' });
+  assert.equal(vars['--pgc-accent'], '#2f9e68');
+  assert.equal(vars['--pgc-ok'], '#2f9e68');
+  assert.equal(vars['--pgc-bad'], '#d94a3d');
+  // 表里没有的键一律当「跟随主题」，不抛异常
+  assert.deepEqual(__test.stripVars({ accent: 'nope' }), {});
+});
+
+test('配色：色值都是合法十六进制，且六个主色互不相同', () => {
+  const accents = __test.ACCENTS;
+  const values = Object.keys(accents)
+    .map((key) => accents[key].value)
+    .filter(Boolean);
+  assert.equal(values.length, 6, '主色应该正好 6 个可选值');
+  values.forEach((value) => assert.match(value, /^#[0-9a-f]{6}$/i));
+  assert.equal(new Set(values).size, values.length, '主色不能有重复');
+});
+
+test('设置面板：分成「长什么样 / 颜色 / 说什么」三组，颜色三项都在', () => {
+  const view = render({
+    partial: { turn: 1, step: 0, blocks: [{ kind: 'reasoning', text: '看看配置' }] },
+    runningCalls: [],
+    nodes: [],
+  });
+  const shown = text(view);
+  assert.match(shown, /长什么样/);
+  assert.match(shown, /颜色/);
+  assert.match(shown, /说什么/);
+  assert.match(shown, /字幕条颜色/);
+  assert.match(shown, /跑成功时/);
+  assert.match(shown, /跑失败时/);
+  // 俏皮词样式三选一
+  assert.match(shown, /淡色底/);
+  assert.match(shown, /实心/);
+  assert.match(shown, /素色/);
+});
+
+test('配色选中后会写回 root 的 style，且 class 带上俏皮词样式', () => {
+  const previous = globalThis.localStorage;
+  globalThis.localStorage = {
+    getItem: () => JSON.stringify({ accent: 'violet', okColor: 'teal', badColor: 'orange', flavorStyle: 'solid' }),
+    setItem: () => {},
+  };
+  try {
+    const view = render({
+      partial: { turn: 1, step: 0, blocks: [{ kind: 'reasoning', text: '看看配置' }] },
+      runningCalls: [],
+      nodes: [],
+    });
+    assert.equal(view.props.style['--pgc-accent'], '#8b5cf6');
+    assert.equal(view.props.style['--pgc-ok'], '#12a594');
+    assert.equal(view.props.style['--pgc-bad'], '#e08a2e');
+    assert.match(view.props.className, /pgc-flavor-solid/);
+  } finally {
+    if (previous === undefined) delete globalThis.localStorage;
+    else globalThis.localStorage = previous;
+  }
 });
 
 test('俏皮词：条数够多、中英一一对齐、取模轮换', () => {
@@ -424,10 +487,10 @@ test('字幕带设置面板：字号 / 行数 / 动画 / 俏皮词', () => {
   assert.match(shown, /行数/);
   assert.match(shown, /动画/);
   assert.match(shown, /俏皮词/);
-  // 「字幕内容」那一行：两个选项都用人话写出来，下面再补一句解释
-  assert.match(shown, /字幕内容/);
-  assert.match(shown, /只看工具/);
-  assert.match(shown, /也看思考/);
+  // 「没线索时」那一行：两个选项都用人话写出来，下面再补一句解释
+  assert.match(shown, /没线索时/);
+  assert.match(shown, /只报动作/);
+  assert.match(shown, /猜一猜/);
   assert.match(shown, /猜错很正常/);
   assert.match(shown, /扫光/);
   assert.match(shown, /呼吸点/);
@@ -436,13 +499,13 @@ test('字幕带设置面板：字号 / 行数 / 动画 / 俏皮词', () => {
   assert.match(view.props.className, /pgc-anim-sweep/);
 });
 
-test('把「字幕内容」切到只看工具 → 选中项跟着变', () => {
+test('把「没线索时」切到只报动作 → 选中项跟着变', () => {
   const dict = dictionaries.get('dshProgressCaption');
-  assert.equal(dict.zh.facts, '字幕内容');
-  assert.equal(dict.zh.factsTools, '只看工具');
-  assert.equal(dict.zh.factsThinking, '也看思考');
-  assert.equal(dict.en.factsTools, 'Tools only');
-  assert.equal(dict.en.factsThinking, 'Tools + thinking');
+  assert.equal(dict.zh.facts, '没线索时');
+  assert.equal(dict.zh.factsTools, '只报动作');
+  assert.equal(dict.zh.factsThinking, '猜一猜');
+  assert.equal(dict.en.factsTools, 'Actions only');
+  assert.equal(dict.en.factsThinking, 'Guess a little');
 
   // 用假 localStorage 模拟用户已经打开过这个开关
   const previous = globalThis.localStorage;
@@ -457,10 +520,10 @@ test('把「字幕内容」切到只看工具 → 选中项跟着变', () => {
       nodes: [],
     });
     const shown = text(view);
-    assert.match(shown, /字幕内容/);
+    assert.match(shown, /没线索时/);
     // 两个选项始终都在，靠选中态区分，不是「开关文字来回换」
-    assert.match(shown, /只看工具/);
-    assert.match(shown, /也看思考/);
+    assert.match(shown, /只报动作/);
+    assert.match(shown, /猜一猜/);
   } finally {
     if (previous === undefined) delete globalThis.localStorage;
     else globalThis.localStorage = previous;
@@ -688,24 +751,54 @@ test('俏皮词真的画得出来：思考时挂着，且不会被主文案挤�
   assert.ok(text(flavors[0]).trim().length > 0, '俏皮词不能是空的');
 });
 
-test('有俏皮词时收掉「进行中」，且俏皮词排在耗时右边（两回事，各占一头）', () => {
-  const view = render({
+test('有俏皮词时让位给词，没词时显示「进行中」，俏皮词固定在最右', () => {
+  const withWords = render({
     partial: { turn: 3, step: 0, blocks: [{ kind: 'reasoning', text: '我先读取配置文件 package.json' }] },
     runningCalls: [],
     nodes: [],
     turnEnds: new Map(),
   });
-  let live = null;
-  const walk = (node) => {
-    if (!node || typeof node !== 'object') return;
-    if (node.props && node.props.className === 'pgc-live') live = node;
-    (node.children || []).forEach(walk);
+  const liveOf = (view) => {
+    let live = null;
+    const walk = (node) => {
+      if (!node || typeof node !== 'object') return;
+      if (node.props && node.props.className === 'pgc-live') live = node;
+      (node.children || []).forEach(walk);
+    };
+    walk(view);
+    return live;
   };
-  walk(view);
-  const classes = (live.children || []).map((c) => (c && c.props && c.props.className) || '');
+  const classes = (liveOf(withWords).children || []).map((c) => (c && c.props && c.props.className) || '');
   assert.ok(classes.includes('pgc-flavor'), '应该有俏皮词');
-  assert.ok(classes.indexOf('pgc-chip') === -1, '有俏皮词时不该再显示状态胶囊');
-  assert.ok(classes.indexOf('pgc-time') < classes.indexOf('pgc-flavor'), '俏皮词应该挂在耗时右边');
+  assert.ok(classes.includes('pgc-dot'), '状态小圆点必须在，由它表达进行中');
+  assert.ok(!classes.includes('pgc-chip'), '有俏皮词时不再重复挂「进行中」，省出宽度');
+  assert.equal(classes[classes.length - 1], 'pgc-flavor', '俏皮词固定在最右');
+});
+
+test('关掉俏皮词后，「进行中」胶囊补回来', () => {
+  const previous = globalThis.localStorage;
+  globalThis.localStorage = { getItem: () => JSON.stringify({ words: false }), setItem: () => {} };
+  try {
+    const view = render({
+      partial: { turn: 3, step: 0, blocks: [{ kind: 'reasoning', text: '我先读取配置文件 package.json' }] },
+      runningCalls: [],
+      nodes: [],
+      turnEnds: new Map(),
+    });
+    let live = null;
+    const walk = (node) => {
+      if (!node || typeof node !== 'object') return;
+      if (node.props && node.props.className === 'pgc-live') live = node;
+      (node.children || []).forEach(walk);
+    };
+    walk(view);
+    const classes = (live.children || []).map((c) => (c && c.props && c.props.className) || '');
+    assert.ok(classes.includes('pgc-chip'), '没有俏皮词时必须有状态胶囊');
+    assert.ok(!classes.includes('pgc-flavor'), '关掉后不该再有俏皮词');
+  } finally {
+    if (previous === undefined) delete globalThis.localStorage;
+    else globalThis.localStorage = previous;
+  }
 });
 
 test('回合小结：只数上一回合结束之后的结果', () => {
