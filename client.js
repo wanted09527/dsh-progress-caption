@@ -1768,10 +1768,13 @@ window.__ModuleLoader__.load({
   0%, 100% { box-shadow: 0 0 0 2px color-mix(in srgb, var(--pgc-accent) 22%, transparent); }
   50% { box-shadow: 0 0 0 5px color-mix(in srgb, var(--pgc-accent) 6%, transparent); }
 }
-/* 扫光档的三点起跳：只动 transform（合成层），不改宽高、不重排。 */
+/* 扫光档的三点起跳：只动 transform（合成层），不改宽高、不重排。
+   起点先压扁一点再弹起（squash & stretch），比匀速上下移动更像有重量的东西；
+   这是 dsh-claude-style 的 .dsh-claude-chat-wait-dot 用的手法（它压得更狠，1.7/.25）。 */
 @keyframes pgc-hop {
-  0%, 60%, 100% { transform: translateY(0) scaleY(1); }
-  30% { transform: translateY(-3px) scaleY(1.15); }
+  0%, 60%, 100% { transform: translateY(0) scale(1, 1); }
+  8% { transform: translateY(0) scale(1.28, .72); }
+  30% { transform: translateY(-3px) scale(.92, 1.12); }
 }
 @keyframes pgc-sweep { 0% { background-position: 120% 0; } 100% { background-position: -60% 0; } }
 `;
