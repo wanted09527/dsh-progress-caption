@@ -590,6 +590,11 @@ window.__ModuleLoader__.load({
       return Math.max(0, now - held.at) < MIN_SHOW_MS ? held.view : null;
     }
 
+    /** 取会话选择器 Hook。只在 Live 组件里调用，那边已确认 props.useChat 存在。 */
+    function useChatOf(props) {
+      return props.useChat;
+    }
+
     /** 耗时文案：一分钟内报秒（1.2s），超过报分秒（1分15秒）。 */
     function durationText(ms) {
       const total = Math.max(0, Number(ms) || 0);
@@ -871,13 +876,22 @@ window.__ModuleLoader__.load({
         control);
     }
 
+    /**
+     * 外层只决定「渲染哪个组件」。
+     * 不能在同一个组件里写「有 useChat 就调 Hook、没有就不调」：那样两次渲染的 Hook
+     * 数量会变，React 会报 Rendered fewer hooks than expected。换组件就没这问题，
+     * 因为每个组件内部的 Hook 数量是固定的。
+     */
     function CaptionStrip(props) {
+      return props.useChat ? h(CaptionStripLive, props) : null;
+    }
+
+    function CaptionStripLive(props) {
       const t = props.t || translate;
-      const useChat = props.useChat;
-      const partial = useChat ? useChat((state) => state.legacy.partial) : null;
-      const runningCalls = useChat ? useChat((state) => state.legacy.runningCalls) : EMPTY;
-      const nodes = useChat ? useChat((state) => state.legacy.nodes) : EMPTY;
-      const turnEnds = useChat ? useChat((state) => state.legacy.turnEnds) : null;
+      const partial = useChatOf(props)((state) => state.legacy.partial);
+      const runningCalls = useChatOf(props)((state) => state.legacy.runningCalls);
+      const nodes = useChatOf(props)((state) => state.legacy.nodes);
+      const turnEnds = useChatOf(props)((state) => state.legacy.turnEnds);
       // 这一轮结束没有？判断顺序：partial 里带着 turn；partial 短暂为空时用「刚见过的那一轮」兜底。
       // 不用 turnTimings 猜（历史会话里回合表可能不全，会误判成永远在跑）。
       // 只要这一轮还开着，字幕就一直挂着——两步之间 partial 为空也不收。
@@ -1191,10 +1205,13 @@ window.__ModuleLoader__.load({
 
     /** 回合末尾的一行小结（挂在 conversation.chat.turnTail）。 */
     function TurnSummary(props) {
+      return props.useChat ? h(TurnSummaryLive, props) : null;
+    }
+
+    function TurnSummaryLive(props) {
       const t = props.t || translate;
-      const useChat = props.useChat;
-      const nodes = useChat ? useChat((state) => state.legacy.nodes) : EMPTY;
-      const turnEnds = useChat ? useChat((state) => state.legacy.turnEnds) : null;
+      const nodes = useChatOf(props)((state) => state.legacy.nodes);
+      const turnEnds = useChatOf(props)((state) => state.legacy.turnEnds);
       const turn = props.turn;
       if (!turn || turn.status !== 'closed' || typeof turn.turn !== 'number') return null;
       const summary = summarizeTurn({

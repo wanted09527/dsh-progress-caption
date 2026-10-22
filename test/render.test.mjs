@@ -43,11 +43,23 @@ function makeReact() {
 }
 
 /** 把渲染树里所有字符串拼出来，方便断言。 */
+/** 把函数组件（外层壳）就地展开成元素树：组件的 Hook 分流靠「换组件」实现，测试得跟进去。 */
+function resolve(node) {
+  let current = node;
+  for (let guard = 0; guard < 20; guard += 1) {
+    if (!current || typeof current !== 'object' || Array.isArray(current)) return current;
+    if (typeof current.type !== 'function') return current;
+    current = current.type(current.props);
+  }
+  throw new Error('组件展开超过 20 层，可能有循环渲染');
+}
+
 function text(node) {
   if (node === null || node === undefined || node === false) return '';
   if (typeof node === 'string') return node;
   if (typeof node === 'number') return String(node);
   if (Array.isArray(node)) return node.map(text).join(' ');
+  if (typeof node.type === 'function') return text(resolve(node));
   return text(node.children);
 }
 
@@ -132,7 +144,7 @@ test('中英字典都注册了，规则文案自动并进去', () => {
 const { component } = registrations[0];
 
 function render(legacy) {
-  return component({ useChat: (selector) => selector({ legacy }) });
+  return resolve(component({ useChat: (selector) => selector({ legacy }) }));
 }
 
 const empty = { partial: null, runningCalls: [], nodes: [] };
@@ -714,14 +726,21 @@ test('回合小结组件：结在回合末尾，没有工具就返回 null', () 
     { kind: 'tool-result', seq: 10, callTime: 100, time: 200, isError: false, content: [], args: {}, call: null, subCalls: [] },
     { kind: 'tool-result', seq: 20, callTime: 1000, time: 2500, isError: true, error: { name: 'Error', code: 'E' }, content: [], args: {}, call: null, subCalls: [] },
   ], turnEnds: new Map([[0, 5]]) };
-  const view = summary({ useChat: (selector) => selector({ legacy }), turn: { turn: 1, status: 'closed', steps: 2, data: [] }, seq: 25 });
+  const view = resolve(summary({ useChat: (selector) => selector({ legacy }), turn: { turn: 1, status: 'closed', steps: 2, data: [] }, seq: 25 }));
   assert.match(text(view), /本回合 · 2 次工具 · 1 成 1 败 · 用时 2\.4s/);
 
-  const quiet = summary({ useChat: (selector) => selector({ legacy: { nodes: legacy.nodes, turnEnds: new Map([[0, 5], [1, 25]]) } }), turn: { turn: 2, status: 'closed', steps: 1, data: [] }, seq: 30 });
+  const quiet = resolve(summary({ useChat: (selector) => selector({ legacy: { nodes: legacy.nodes, turnEnds: new Map([[0, 5], [1, 25]]) } }), turn: { turn: 2, status: 'closed', steps: 1, data: [] }, seq: 30 }));
   assert.equal(quiet, null, '上一回合之后没有新结果 → 不占位置');
 
-  const open = summary({ useChat: (selector) => selector({ legacy }), turn: { turn: 1, status: 'open', steps: 2, data: [] }, seq: 25 });
+  const open = resolve(summary({ useChat: (selector) => selector({ legacy }), turn: { turn: 1, status: 'open', steps: 2, data: [] }, seq: 25 }));
   assert.equal(open, null, '回合还没结束 → 不显示');
+});
+
+test('宿主没注入 useChat 时不崩：外层直接返回 null，不进任何 Hook', () => {
+  const caption = registrations[0].component;
+  const summary = registrations[1].component;
+  assert.equal(caption({ t: (k) => k }), null);
+  assert.equal(summary({ t: (k) => k }), null);
 });
 
 test('同一动作换着说法：每条规则至少 3 种，且不同步数会说不同的话', () => {
