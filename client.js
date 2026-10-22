@@ -52,8 +52,11 @@ window.__ModuleLoader__.load({
     const OK_LINGER_MS = 5000;
     /** 一条字幕最少挂多久：模型想得快时状态零点几秒就结束，留够人读完一行的时间。 */
     const MIN_SHOW_MS = 2600;
-    /** 计时器刷新间隔：1 秒太迟钝，400ms 跟手又不费电。 */
-    const NOW_MS = 400;
+    /** 计时器刷新间隔：400ms 会让「1.2s」的小数位每 400ms 抖一次，看着像闪；
+     *  改成 1 秒只动一次，读数仍然准（秒级本来就够了）。 */
+    const NOW_MS = 1000;
+    /** 动画档位：calm = 只有小圆点轻轻呼吸（默认，最不打扰）；sweep = 文字扫光；off = 全静止。 */
+    const ANIMS = ['calm', 'sweep', 'off'];
     /** 两步之间 partial 会短暂为空；这段时间（毫秒）内仍算「这一轮还在跑」，字幕不许收。 */
     const TURN_GAP_MS = 20000;
     /** 回合小结挂在 turnTail，排序避开官方与其他插件。 */
@@ -275,11 +278,12 @@ window.__ModuleLoader__.load({
         sizeS: '小',
         sizeM: '中',
         sizeL: '大',
-        lines: '行数',
+        subLine: '思考原话',
+        subLineHint: '打开后，主文案下面多一行模型自己写的思考首句',
         anim: '动画',
+        animCalm: '安静',
         animSweep: '扫光',
-        animDots: '呼吸点',
-        animOff: '关闭',
+        animOff: '全静止',
         colorAccent: '字幕条颜色',
         colorOk: '跑成功时',
         colorBad: '跑失败时',
@@ -359,11 +363,12 @@ window.__ModuleLoader__.load({
         sizeS: 'Small',
         sizeM: 'Medium',
         sizeL: 'Large',
-        lines: 'Lines',
+        subLine: 'Raw thought',
+        subLineHint: 'Also show the first line of what the model itself wrote',
         anim: 'Animation',
+        animCalm: 'Calm',
         animSweep: 'Shimmer',
-        animDots: 'Breathe',
-        animOff: 'Off',
+        animOff: 'Still',
         colorAccent: 'Strip',
         colorOk: 'When it works',
         colorBad: 'When it fails',
@@ -509,11 +514,10 @@ window.__ModuleLoader__.load({
 
     const SETTINGS_KEY = 'dsh-progress-caption:settings';
     const DEFAULT_SETTINGS = {
-      size: 'm', lines: 1, anim: 'sweep', words: true, factsOnly: false,
+      size: 'm', subLine: false, anim: 'calm', words: true, factsOnly: false,
       accent: 'theme', okColor: 'theme', badColor: 'theme', flavorStyle: 'tint',
     };
     const SIZES = ['s', 'm', 'l'];
-    const ANIMS = ['sweep', 'dots', 'off'];
     const FLAVOR_STYLES = ['tint', 'solid', 'plain'];
 
     /**
@@ -562,10 +566,13 @@ window.__ModuleLoader__.load({
 
     function normalizeSettings(raw) {
       const source = raw && typeof raw === 'object' ? raw : {};
-      const lines = Number(source.lines);
       return {
         size: pick(source.size, SIZES, DEFAULT_SETTINGS.size),
-        lines: lines === 2 || lines === 3 ? lines : 1,
+        // 旧版本这里是 lines: 1|2|3，实测只起到「要不要显示副行」的开关作用，
+        // 所以换成布尔开关；老存档里 lines>=2 的等价于 subLine:true，免得升级后设置被重置。
+        subLine: source.subLine === undefined
+          ? Number(source.lines) >= 2
+          : Boolean(source.subLine),
         anim: pick(source.anim, ANIMS, DEFAULT_SETTINGS.anim),
         words: source.words === undefined ? DEFAULT_SETTINGS.words : Boolean(source.words),
         factsOnly: source.factsOnly === undefined ? DEFAULT_SETTINGS.factsOnly : Boolean(source.factsOnly),
@@ -1033,20 +1040,35 @@ window.__ModuleLoader__.load({
       // 一闪而过的状态也要留一会儿再收：模型想得快的时候，字幕常常零点几秒就消失，人来不及读。
       // 规则：新状态立刻顶上；状态没了之后，最后一条至少挂满 MIN_SHOW_MS。
       const [held, setHeld] = React.useState(null);
+      // 用 ref 记住「正在挂住的那条」，effect 里不再读 state。
+      // 之前 effect 依赖里带着 held 自己：每次 view 变化都会 setHeld 一个新对象 →
+      // 又多一轮渲染 → 视觉上就是抖一下、闪一下。
+      const heldRef = React.useRef(null);
+      heldRef.current = held;
+      const liveKey = view ? view.key : null;
       React.useEffect(() => {
         if (view) {
-          setHeld((prev) => (prev && prev.key === view.key ? prev : { key: view.key, view, at: Date.now() }));
+          // 同一个 key 就不动 state（view 每次都是新对象，无脑 set 会白白多渲染一轮）。
+          if (heldRef.current && heldRef.current.key === view.key) return undefined;
+          const next = { key: view.key, view, at: Date.now() };
+          heldRef.current = next;
+          setHeld(next);
           return undefined;
         }
-        if (!held || !held.view) return undefined;
-        const left = MIN_SHOW_MS - (Date.now() - held.at);
-        if (left <= 0) {
+        const prev = heldRef.current;
+        if (!prev || !prev.view) return undefined;
+        const left = MIN_SHOW_MS - (Date.now() - prev.at);
+        const clear = () => {
+          heldRef.current = null;
           setHeld(null);
+        };
+        if (left <= 0) {
+          clear();
           return undefined;
         }
-        const timer = setTimeout(() => setHeld(null), left);
+        const timer = setTimeout(clear, left);
         return () => clearTimeout(timer);
-      }, [view ? view.key : null, held]);
+      }, [liveKey]);
       const shown = pickView(view, held, Date.now());
       const holding = Boolean(shown) && !view;
 
@@ -1125,6 +1147,12 @@ window.__ModuleLoader__.load({
         return () => clearTimeout(timer);
       }, [viewKey, viewState]);
       const showFull = Boolean(shown) && !gone;
+
+      // 收起时不要立刻把文字抽走：那样会看到「字先消失、空壳再缩」的两段动作。
+      // 记住最后一次画出来的内容，让它在收起的 180ms 里跟着淡出，看起来才是一个整体。
+      const paintedRef = React.useRef(null);
+      if (shown) paintedRef.current = shown;
+      const painted = showFull ? shown : paintedRef.current;
 
       const status = !shown
         ? ''
@@ -1208,14 +1236,9 @@ window.__ModuleLoader__.load({
               { value: 'm', label: 'sizeM' },
               { value: 'l', label: 'sizeL' },
             ], (value) => update({ size: value }))),
-            settingRow(t, 'lines', seg('lines', String(settings.lines), [
-              { value: '1', label: '1' },
-              { value: '2', label: '2' },
-              { value: '3', label: '3' },
-            ], (value) => update({ lines: Number(value) }))),
             settingRow(t, 'anim', seg('anim', settings.anim, [
+              { value: 'calm', label: 'animCalm' },
               { value: 'sweep', label: 'animSweep' },
-              { value: 'dots', label: 'animDots' },
               { value: 'off', label: 'animOff' },
             ], (value) => update({ anim: value }))),
             h('span', { className: 'pgc-group' }, t('groupColor')),
@@ -1237,6 +1260,7 @@ window.__ModuleLoader__.load({
             ], (value) => update({ flavorStyle: value }))),
             h('span', { className: 'pgc-group' }, t('groupSay')),
             settingRow(t, 'words', switchButton(settings.words, settings.words ? t('wordsOn') : t('wordsOff'), '', () => update({ words: !settings.words }))),
+            settingRow(t, 'subLine', switchButton(settings.subLine, settings.subLine ? t('wordsOn') : t('wordsOff'), t('subLineHint'), () => update({ subLine: !settings.subLine }))),
             settingRow(t, 'facts', seg('facts', settings.factsOnly ? 'tools' : 'thinking', [
               { value: 'tools', label: 'factsTools' },
               { value: 'thinking', label: 'factsThinking' },
@@ -1245,20 +1269,16 @@ window.__ModuleLoader__.load({
             h('p', { className: 'pgc-sheet-note' }, t('sheetNote')),
             h('p', { className: 'pgc-sheet-note' }, t('disclaimer')))));
 
-      // 空闲（或成功已淡出）时只留一个很小的齿轮：设置随时点得到，又不占地方。
-      if (!showFull) {
-        return h('div', {
-          className: 'pgc-strip pgc-strip--handle',
-          'data-plugin': 'dsh-progress-caption',
-        }, settingsPanel);
-      }
-
+      // 注意：这里不再「有字幕就返回整条、没字幕就返回把手」两套结构。
+      // 两套结构会让 React 把整棵子树卸载重建，看起来就是闪一下、没有过渡。
+      // 现在永远返回同一个外层（状态条），只切 class；里面的内容用 .pgc-band 收放，
+      // 收起来时它高度变 0 并淡出，过渡由 CSS 负责。
       const stripClass = [
         'pgc-strip',
-        'pgc-strip--' + shown.state,
+        'pgc-strip--' + (shown ? shown.state : 'idle'),
         holding ? 'pgc-strip--held' : null,
+        showFull ? null : 'pgc-strip--handle',
         'pgc-size-' + settings.size,
-        'pgc-lines-' + settings.lines,
         'pgc-anim-' + settings.anim,
         'pgc-flavor-' + settings.flavorStyle,
       ].filter(Boolean).join(' ');
@@ -1271,35 +1291,41 @@ window.__ModuleLoader__.load({
         title: t('disclaimer'),
         style: Object.keys(colorVars).length > 0 ? colorVars : undefined,
       },
-        // 朗读区域只包状态文字：设置面板不在里面，免得切换时被一起念出来。
-        h('span', { className: 'pgc-live', role: 'status', 'aria-live': 'polite' },
-          shown.step !== null
-            ? h('span', { className: 'pgc-step' }, fmt(t('step'), { n: shown.step }))
+        // 收起时不再「整段不渲染」：内容留着，由 .pgc-band 的高度/透明度过渡把它收掉。
+        // 这样字的淡出和条的收缩是同一个动作；也免得读屏念一遍已经看不见的字（收起时 aria-hidden）。
+        h('span', { className: 'pgc-band', 'aria-hidden': showFull ? undefined : 'true' },
+          painted && showFull
+            ? h('span', { className: 'pgc-live', role: 'status', 'aria-live': 'polite' },
+              painted.step !== null
+                ? h('span', { className: 'pgc-step' }, fmt(t('step'), { n: painted.step }))
+                : null,
+              h('span', { className: 'pgc-dot', 'aria-hidden': true }),
+              // 加 key 让「换文案」重挂载一次，淡入才会重播；label 已经被 holdMs
+              // 稳定过（最快 350ms / 快思考 800ms 才换一次），比 160ms 的动画长，不会连成闪烁。
+              h('span', { className: 'pgc-text' },
+                h('span', { className: 'pgc-label', key: label }, label),
+                // 「思考原话」开关打开后，才多给一行模型自己的思考首句当副行。
+                settings.subLine && painted.state === 'thinking' && painted.sub
+                  ? h('span', { className: 'pgc-sub' }, painted.sub)
+                  : null),
+              // 俏皮词在场时，不再重复挂「进行中」——两个都在就互相挤，主文案被压成两三个字。
+              // 进行中由左侧小圆点表达；「成功 / 失败」是结论，任何时候都留着。
+              status && (!suffix || painted.state === 'ok' || painted.state === 'error')
+                ? h('span', { className: 'pgc-chip' }, status)
+                : null,
+              // 不到 1 秒不显示耗时：刚切过来就挂个「0.0s」，像坏了一样。
+              // 数字宽度用 tabular-nums + 固定 min-width 锁住，每秒跳动不会推动别人。
+              painted.elapsedMs !== null && painted.elapsedMs >= 1000
+                ? h('span', { className: 'pgc-time' }, durationText(painted.elapsedMs))
+                : null,
+              // 俏皮词放最右端：它只是气氛，不属于左边那句状态描述。
+              suffix ? h('span', { className: 'pgc-flavor', key: suffix }, suffix) : null)
             : null,
-          h('span', { className: 'pgc-dot', 'aria-hidden': true }),
-          // 不加 key：换文案时别整块重挂载，否则淡入动画每次都重播，看起来一断一断的。
-          h('span', { className: 'pgc-text' },
-            h('span', { className: 'pgc-label' }, label),
-            // 行数设成 2 及以上，才多给一行「思考原话」当副行。
-            settings.lines >= 2 && shown.state === 'thinking' && shown.sub
-              ? h('span', { className: 'pgc-sub' }, shown.sub)
-              : null),
-          // 俏皮词在场时，不再重复挂「进行中」——两个都在就互相挤，主文案被压成两三个字。
-          // 进行中由左侧小圆点表达；「成功 / 失败」是结论，任何时候都留着。
-          status && (!suffix || shown.state === 'ok' || shown.state === 'error')
-            ? h('span', { className: 'pgc-chip' }, status)
-            : null,
-          // 不到 1 秒不显示耗时：刚切过来就挂个「0.0s」，像坏了一样。
-          shown.elapsedMs !== null && shown.elapsedMs >= 1000
-            ? h('span', { className: 'pgc-time' }, durationText(shown.elapsedMs))
-            : null,
-          // 俏皮词放最右端：它只是气氛，不属于左边那句状态描述。
-          suffix ? h('span', { className: 'pgc-flavor' }, suffix) : null),
-        shown.state === 'error' && shown.rawLine
-          ? h('details', { className: 'pgc-detail' },
-            h('summary', { className: 'pgc-detail-sum' }, t('detail')),
-            h('code', { className: 'pgc-raw' }, shown.rawLine))
-          : null,
+          painted && showFull && painted.state === 'error' && painted.rawLine
+            ? h('details', { className: 'pgc-detail' },
+              h('summary', { className: 'pgc-detail-sum' }, t('detail')),
+              h('code', { className: 'pgc-raw' }, painted.rawLine))
+            : null),
         settingsPanel);
     }
 
@@ -1376,16 +1402,37 @@ window.__ModuleLoader__.load({
   --pgc-ok: var(--dsw-alias-state-success-primary, #2f9e68);
   --pgc-bad: var(--dsw-alias-state-error-primary, #d94a3d);
   display: flex; align-items: center; gap: 8px; box-sizing: border-box;
-  margin: 0 12px 6px; padding: 5px 10px; border-radius: 10px;
+  /* 宽度对齐输入框卡片。官方输入卡是「父容器先左右各留 side-clearance，再由卡片
+     用 max-width 卡上限」两层（uV2eYG_root 的 padding + uV2eYG_card 的 max-width），
+     而字幕条所在的 composerStack 是**没有内边距**的（wSkVaW_composerStack 只有 gap），
+     所以这里必须自己减掉两侧留白，否则会比输入框宽出 2×16px、看起来像撑满整个容器。 */
+  width: calc(100% - 2 * var(--dsh-composer-side-clearance, 16px));
+  max-width: var(--dsh-composer-card-max-width, 952px);
+  margin: 0 auto 6px; padding: 5px 10px; border-radius: 10px;
   border: 1px solid color-mix(in srgb, var(--pgc-accent) 20%, transparent);
   background: color-mix(in srgb, var(--pgc-accent) 8%, transparent);
   line-height: 1.4; color: var(--dsw-alias-label-primary, inherit);
-  transition: background-color .2s ease, border-color .2s ease, opacity .18s ease;
+  /* 根节点故意不挂 animation：它一挂，任何一次重渲染都可能让整条重播一遍，
+     那就是「闪」。入场交给 .pgc-band 的收放过渡，视觉上是一整块浮出来。 */
+  transition: background-color .2s ease, border-color .2s ease, padding .2s cubic-bezier(.23, 1, .32, 1);
 }
+/* 思考/工具/状态切换时只换底色和描边，绝不重排：整条的高度、位置都不动。 */
+.pgc-band {
+  display: flex; align-items: center; gap: 0; min-width: 0; flex: 1 1 auto;
+  /* 7em 是给「主文案 + 副行」留的上限。
+     收放用 max-height（会触发布局，这是唯一一处：不收高度就只能留个空壳），
+     时长压到 180ms 并把缓动换成强 ease-out，看上去是一口气收掉而不是慢慢挤。 */
+  max-height: 7em; opacity: 1; overflow: hidden;
+  transition: max-height .18s cubic-bezier(.23, 1, .32, 1), opacity .16s ease;
+}
+.pgc-strip--handle .pgc-band { max-height: 0; opacity: 0; }
 /* DeepSeek 蓝是主色；成功/失败只换强调色，形状和排版保持一致。 */
 .pgc-strip--ok { border-color: color-mix(in srgb, var(--pgc-ok) 24%, transparent); background: color-mix(in srgb, var(--pgc-ok) 8%, transparent); }
 .pgc-strip--error { border-color: color-mix(in srgb, var(--pgc-bad) 28%, transparent); background: color-mix(in srgb, var(--pgc-bad) 9%, transparent); }
-.pgc-live { display: flex; align-items: center; gap: 7px; min-width: 0; flex: 1 1 auto; }
+/* 入场动画挂在 .pgc-live 上，而不是整条根节点：它只在「有内容 ↔ 无内容」切换时
+   挂载一次，所以一次出现只播一次；根节点挂动画则会被任何重渲染重播，那就是闪。
+   from/to 只碰 opacity 与 transform，不参与布局。 */
+.pgc-live { display: flex; align-items: center; gap: 7px; min-width: 0; flex: 1 1 auto; animation: pgc-enter .22s cubic-bezier(.23, 1, .32, 1) both; }
 .pgc-size-s { font-size: 11px; }
 .pgc-size-m { font-size: 12px; }
 .pgc-size-l { font-size: 13.5px; }
@@ -1396,8 +1443,14 @@ window.__ModuleLoader__.load({
   flex: 0 0 auto; width: 7px; height: 7px; border-radius: 50%;
   background: var(--pgc-accent);
   box-shadow: 0 0 0 3px color-mix(in srgb, var(--pgc-accent) 18%, transparent);
-  animation: pgc-pulse 1.6s ease-in-out infinite;
+  /* 状态从「进行中」翻到「成功 / 失败」时，颜色是渐过去的，不是啪一下换掉。 */
+  transition: background-color .26s cubic-bezier(.23, 1, .32, 1),
+              box-shadow .26s cubic-bezier(.23, 1, .32, 1);
 }
+/* 默认「安静」档：小圆点只做极轻的呼吸（光晕大小变化，不改透明度，所以不会闪）。
+   扫光档才额外给文字加流光；全静止档什么都不动。 */
+.pgc-anim-calm .pgc-dot,
+.pgc-anim-sweep .pgc-dot { animation: pgc-breathe 2.6s ease-in-out infinite; }
 .pgc-strip--ok .pgc-dot {
   background: var(--pgc-ok); animation: none;
   box-shadow: 0 0 0 3px color-mix(in srgb, var(--pgc-ok) 18%, transparent);
@@ -1406,16 +1459,23 @@ window.__ModuleLoader__.load({
   background: var(--pgc-bad); animation: none;
   box-shadow: 0 0 0 3px color-mix(in srgb, var(--pgc-bad) 18%, transparent);
 }
-/* 主文案：一行放不下就省略号，别缩成俩字。 */
+/* 主文案：一行放不下就省略号，别缩成俩字。
+   不再按「行数 2/3」加 line-clamp——主文案是拼出来的整句（十几个字），
+   开 2/3 行几乎不会真的折行，视觉上没差别，所以那个设置项已经删了。 */
 .pgc-text { display: flex; flex-direction: column; justify-content: center; flex: 1 1 auto; min-width: 0; }
 .pgc-sub { flex: 0 0 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: .92em; line-height: 1.5; color: var(--dsw-alias-label-secondary, inherit); opacity: .78; }
 .pgc-label { position: relative; flex: 0 0 auto; min-width: 0; overflow: hidden; display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 1; overflow-wrap: anywhere; }
-.pgc-lines-2 .pgc-label { -webkit-line-clamp: 2; }
-.pgc-lines-3 .pgc-label { -webkit-line-clamp: 3; }
+/* 文案换了才重播的淡入上浮：只动 opacity + translateY（合成层），不改宽高、不重排。
+   160ms 是「看得见但来不及拖沓」的量级；换文案的间隔由 holdMs 兜住，不会连成闪烁。
+   只在「安静 / 扫光」两档挂动画，「全静止」档连这个也关掉。 */
+.pgc-anim-calm .pgc-label,
+.pgc-anim-sweep .pgc-label { animation: pgc-swap .16s cubic-bezier(.23, 1, .32, 1) both; }
 .pgc-anim-sweep .pgc-label::after { content: ''; position: absolute; inset: 0; pointer-events: none; background-image: linear-gradient(100deg, transparent 38%, color-mix(in srgb, var(--pgc-accent) 28%, transparent) 50%, transparent 62%); background-size: 260% 100%; background-repeat: no-repeat; animation: pgc-sweep 2.2s linear infinite; }
-/* 俏皮词：不用斜体（中文被强行倾斜很难看），固定占最右一格，宽度稳、不跟主文案抢。 */
+/* 俏皮词：不用斜体（中文被强行倾斜很难看），固定占最右一格。
+   宽度写死 6.6em：词最短 3 字最长 5 字，写死之后换词时右边这块纹丝不动，
+   左边的状态文字就不会被一会儿推左一会儿推右（这也是「闪」的一个来源）。 */
 .pgc-flavor {
-  flex: 0 0 auto; min-width: 5.5em; max-width: 46%; margin-left: 6px;
+  flex: 0 0 auto; width: 6.6em; max-width: 46%; margin-left: 6px;
   overflow: hidden; text-overflow: ellipsis; white-space: nowrap; text-align: center;
   font-style: normal; font-weight: 600; font-size: .95em; line-height: 1.6; letter-spacing: .2px;
   color: var(--pgc-accent);
@@ -1425,6 +1485,10 @@ window.__ModuleLoader__.load({
   transition: color .18s ease, background-color .18s ease, border-color .18s ease;
 }
 /* 俏皮词三种样式：淡色底（默认）/ 实心 / 素色（不要底色，只留字）。 */
+/* 换词的时候也做一次同款淡入（起点 .45，不是 0）：宽度写死 6.6em，所以这一步
+   只发生在合成层，左边的状态文字纹丝不动。全静止档由上面的规则统一关掉。 */
+.pgc-anim-calm .pgc-flavor,
+.pgc-anim-sweep .pgc-flavor { animation: pgc-swap .2s cubic-bezier(.23, 1, .32, 1) both; }
 .pgc-flavor-solid .pgc-flavor { color: #fff; background: var(--pgc-accent); border-color: transparent; }
 .pgc-flavor-plain .pgc-flavor { color: var(--pgc-accent); background: transparent; border-color: transparent; opacity: .92; }
 .pgc-strip--ok .pgc-flavor {
@@ -1444,10 +1508,10 @@ window.__ModuleLoader__.load({
 .pgc-chip { flex: 0 0 auto; padding: 0 6px; border: 1px solid color-mix(in srgb, var(--pgc-accent) 38%, transparent); border-radius: 999px; font-size: 11px; color: var(--pgc-accent); }
 .pgc-strip--ok .pgc-chip { color: var(--pgc-ok); border-color: color-mix(in srgb, var(--pgc-ok) 48%, transparent); }
 .pgc-strip--error .pgc-chip { color: var(--pgc-bad); border-color: color-mix(in srgb, var(--pgc-bad) 52%, transparent); }
-.pgc-time { flex: 0 0 auto; font-variant-numeric: tabular-nums; color: var(--dsw-alias-label-secondary, inherit); opacity: .9; }
-.pgc-strip--handle { margin: 0; padding: 0 14px 2px; background: transparent; border-color: transparent; justify-content: flex-end; }
-/* 状态已经结束、只是还没挂满最短停留时间：稍微淡一点，表示它马上收。 */
-.pgc-strip--held { opacity: .88; }
+.pgc-time { flex: 0 0 auto; min-width: 3.6em; text-align: right; font-variant-numeric: tabular-nums; color: var(--dsw-alias-label-secondary, inherit); opacity: .9; }
+.pgc-strip--handle { padding: 0 10px 2px; background: transparent; border-color: transparent; justify-content: flex-end; }
+/* 状态已经结束、只是还没挂满最短停留时间：保持不透明，靠收起动画收，不要再压暗一次（压暗会被看成闪）。 */
+.pgc-strip--held { opacity: 1; }
 .pgc-summary { margin: 2px 0 4px; font-size: 11px; color: var(--dsw-alias-label-secondary, inherit); opacity: .7; }
 .pgc-summary-text { font-variant-numeric: tabular-nums; }
 .pgc-detail { flex: 0 0 auto; }
@@ -1536,13 +1600,30 @@ window.__ModuleLoader__.load({
 .pgc-switch[data-on='true'] .pgc-switch-label { color: var(--dsw-alias-label-primary, currentColor); }
 .pgc-anim-off .pgc-dot { animation: none; opacity: .45; }
 .pgc-anim-off .pgc-label::after { content: none; animation: none; }
+/* 「全静止」档真的全静止：入场、换文案、换词都不动，只剩底色过渡（那不算动效）。 */
+.pgc-anim-off .pgc-live, .pgc-anim-off .pgc-label, .pgc-anim-off .pgc-flavor { animation: none; }
 @media (prefers-reduced-motion: reduce) {
   .pgc-strip, .pgc-strip * { animation: none !important; transition: none !important; }
   .pgc-label::after { content: none !important; }
+  /* 系统开了「减少动态效果」时，也不再做位移和缩放，只留颜色的硬切换。 */
+  .pgc-band { max-height: 7em; opacity: 1; }
+  .pgc-strip--handle .pgc-band { max-height: 0; opacity: 0; }
 }
-@keyframes pgc-pulse { 0%, 100% { opacity: .22; } 50% { opacity: .65; } }
+@keyframes pgc-enter {
+  from { opacity: 0; transform: translateY(2px) scale(.984); }
+  to { opacity: 1; transform: none; }
+}
+/* 换文案/换词用的：起点不是 0 而是 .45 —— 真的从 0 开始，每隔几百毫秒就有一次
+   「字消失再浮现」，看着就是闪。从 .45 起跳是「换了一句话」而不是「断了一下」。 */
+@keyframes pgc-swap {
+  from { opacity: .45; transform: translateY(2px); }
+  to { opacity: 1; transform: none; }
+}
+@keyframes pgc-breathe {
+  0%, 100% { box-shadow: 0 0 0 2px color-mix(in srgb, var(--pgc-accent) 22%, transparent); }
+  50% { box-shadow: 0 0 0 5px color-mix(in srgb, var(--pgc-accent) 6%, transparent); }
+}
 @keyframes pgc-sweep { 0% { background-position: 120% 0; } 100% { background-position: -60% 0; } }
-@keyframes pgc-fade { from { opacity: 0; transform: translateY(1px); } to { opacity: 1; transform: none; } }
 `;
 
     function apply(ctx) {

@@ -8,6 +8,7 @@ dist/
 
 # 本地预览 / 截图工具的临时产物
 preview.html
+preview.png
 preview-zoom.png
 .edge-profile/
 

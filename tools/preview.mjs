@@ -34,18 +34,11 @@ const sheet = (open) => `
                 <button type="button" class="pgc-seg-btn" data-on="false">大</button>
               </span>
             </label>
-            <label class="pgc-set-row"><span class="pgc-set-name">行数</span>
-              <span class="pgc-seg" role="group">
-                <button type="button" class="pgc-seg-btn" data-on="true">1</button>
-                <button type="button" class="pgc-seg-btn" data-on="false">2</button>
-                <button type="button" class="pgc-seg-btn" data-on="false">3</button>
-              </span>
-            </label>
             <label class="pgc-set-row"><span class="pgc-set-name">动画</span>
               <span class="pgc-seg" role="group">
-                <button type="button" class="pgc-seg-btn" data-on="true">扫光</button>
-                <button type="button" class="pgc-seg-btn" data-on="false">呼吸点</button>
-                <button type="button" class="pgc-seg-btn" data-on="false">关闭</button>
+                <button type="button" class="pgc-seg-btn" data-on="true">安静</button>
+                <button type="button" class="pgc-seg-btn" data-on="false">扫光</button>
+                <button type="button" class="pgc-seg-btn" data-on="false">全静止</button>
               </span>
             </label>
             <span class="pgc-group">颜色</span>
@@ -87,6 +80,12 @@ const sheet = (open) => `
                 <span class="pgc-switch-label">开</span>
               </button>
             </label>
+            <label class="pgc-set-row"><span class="pgc-set-name">思考原话</span>
+              <button type="button" class="pgc-switch" role="switch" data-on="false" aria-checked="false">
+                <span class="pgc-switch-track"><span class="pgc-switch-thumb"></span></span>
+                <span class="pgc-switch-label">关</span>
+              </button>
+            </label>
             <label class="pgc-set-row"><span class="pgc-set-name">没线索时</span>
               <span class="pgc-seg" role="group">
                 <button type="button" class="pgc-seg-btn" data-on="false">只报动作</button>
@@ -99,8 +98,8 @@ const sheet = (open) => `
         </div>
       </div>`;
 
-const strip = (state, body, extra = '', lines = 1) => `
-      <div class="pgc-strip pgc-strip--${state} pgc-size-m pgc-lines-${lines} pgc-anim-sweep" data-plugin="dsh-progress-caption" title="字幕由规则推断，不代表模型真实意图">
+const strip = (state, body, extra = '') => `
+      <div class="pgc-strip pgc-strip--${state} pgc-size-m pgc-anim-calm" data-plugin="dsh-progress-caption" title="字幕由规则推断，不代表模型真实意图">
         <span class="pgc-live" role="status" aria-live="polite">${body}</span>
         ${extra}
         ${sheet(false)}

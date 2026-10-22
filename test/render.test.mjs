@@ -15,11 +15,20 @@ const CLIENT = path.join(HERE, '..', 'client.js');
 /* ---------------- 假环境：window / document / React ---------------- */
 
 let captured = null;
+/** 记录插件创建的 DOM 元素（样式那一支要拿它的 textContent 做断言）。 */
+const created = [];
 globalThis.window = { __ModuleLoader__: { load: (spec) => { captured = spec; } } };
 globalThis.document = {
   head: { appendChild() {} },
   createElement() {
-    return { setAttribute() {}, remove() {}, textContent: '' };
+    const element = {
+      attrs: {},
+      setAttribute(name, value) { element.attrs[name] = value; },
+      remove() {},
+      textContent: '',
+    };
+    created.push(element);
+    return element;
   },
 };
 
@@ -137,6 +146,77 @@ test('中英字典都注册了，规则文案自动并进去', () => {
   assert.equal(dict.zh['r_read-config'], '正在读取配置文件');
   assert.equal(dict.en['r_read-config'], 'reading a config file');
   assert.equal(effects.length, 2, 'locale + 样式两个 effect');
+});
+
+/* ---------------- 样式表：不闪 / 不撑满的硬约束 ----------------
+ * 这两条只能靠 CSS 保证，逻辑测试看不出来，所以直接对注入的样式文本做断言。
+ * 一旦有人把宽度改回 100%、或者给整条加无限动画，这里会红。 */
+const cssTag = created.find((element) => element.attrs['data-plugin'] === 'dsh-progress-caption');
+const sheet = cssTag ? cssTag.textContent : '';
+
+test('样式表注入到 head，且带 data-plugin 标记', () => {
+  assert.ok(cssTag, '要注入 <style data-plugin="dsh-progress-caption">');
+  assert.ok(sheet.length > 1000, '样式内容不该是空的');
+});
+
+test('字幕条宽度跟输入框对齐：减掉两侧留白，不写 100%', () => {
+  const rule = /\.pgc-strip \{([\s\S]*?)\}/.exec(sheet);
+  assert.ok(rule, '要能找到 .pgc-strip 规则');
+  const body = rule[1];
+  assert.match(body, /calc\(100% - 2 \* var\(--dsh-composer-side-clearance, 16px\)\)/,
+    '父容器没有内边距，必须自己减两侧留白');
+  assert.match(body, /max-width: var\(--dsh-composer-card-max-width, 952px\)/,
+    '宽度上限要跟输入框卡片一致');
+  assert.match(body, /margin: 0 auto/, '要居中');
+  assert.doesNotMatch(body, /(^|\W)width: 100%/, '写 100% 就会把整行撑满');
+});
+
+test('整条字幕条没有无限动画；只有状态点在安静档里做呼吸', () => {
+  const stripRule = /\.pgc-strip \{([\s\S]*?)\}/.exec(sheet)[1];
+  assert.doesNotMatch(stripRule, /animation:/, '根节点上不许挂动画（会整条闪）');
+  assert.match(sheet, /\.pgc-anim-calm \.pgc-dot,\s*\n\s*\.pgc-anim-sweep \.pgc-dot \{ animation: pgc-breathe/,
+    '呼吸只给状态点');
+  const breathe = /@keyframes pgc-breathe \{([\s\S]*?)\n\}/.exec(sheet);
+  assert.ok(breathe, '要有 pgc-breathe');
+  assert.doesNotMatch(breathe[1], /opacity:/, '呼吸不许动 opacity（会看着在闪）');
+});
+
+test('俏皮词占固定宽度，换词不推挤主文案', () => {
+  const flavor = /\.pgc-flavor \{([\s\S]*?)\}/.exec(sheet);
+  assert.ok(flavor, '要能找到 .pgc-flavor 规则');
+  assert.match(flavor[1], /width: 6\.6em/, '宽度写死，词长变化才不会推动左边');
+  assert.doesNotMatch(flavor[1], /min-width:/, 'min-width 会让宽度跟着词长浮动');
+});
+
+test('系统开了「减少动态效果」就把动画全关掉', () => {
+  assert.match(sheet, /@media \(prefers-reduced-motion: reduce\)/);
+  assert.match(sheet, /animation: none !important/);
+  assert.match(sheet, /transition: none !important/);
+});
+
+test('换文案的动画从半透明起步，不是从 0 闪出来', () => {
+  const swap = /@keyframes pgc-swap \{([\s\S]*?)\n\}/.exec(sheet);
+  assert.ok(swap, '要有 pgc-swap');
+  assert.match(swap[1], /opacity: \.45/, '起点要大于 0，否则每次换字都是「消失再浮现」');
+  assert.doesNotMatch(swap[1], /opacity: 0[;,}]/, '换文案不许从完全透明开始');
+  // 换文案的动画只能挂在「安静 / 扫光」两档上；全静止档必须真的静止。
+  assert.match(sheet, /\.pgc-anim-calm \.pgc-label,\s*\n\s*\.pgc-anim-sweep \.pgc-label \{ animation: pgc-swap/);
+  assert.match(sheet, /\.pgc-anim-off \.pgc-live, \.pgc-anim-off \.pgc-label, \.pgc-anim-off \.pgc-flavor \{ animation: none; \}/);
+  // 只在合成层动：位移和透明度，绝不出现 width/height/margin 之类会重排的属性。
+  assert.doesNotMatch(swap[1], /\b(width|height|margin|padding|top|left|right|bottom):/,
+    '换文案不许改尺寸或位置属性');
+});
+
+test('入场只播一次，挂在内容层而不是整条根节点', () => {
+  const stripRule = /\.pgc-strip \{([\s\S]*?)\}/.exec(sheet)[1];
+  assert.doesNotMatch(stripRule, /animation:/, '根节点挂动画会被每次重渲染重播，就是闪');
+  const live = /\.pgc-live \{([\s\S]*?)\}/.exec(sheet);
+  assert.ok(live, '要能找到 .pgc-live 规则');
+  assert.match(live[1], /animation: pgc-enter/, '入场动画挂在内容层，一次出现只播一次');
+  const enter = /@keyframes pgc-enter \{([\s\S]*?)\n\}/.exec(sheet);
+  assert.ok(enter, '要有 pgc-enter');
+  assert.match(enter[1], /scale\(\.98/, '入场是轻微放大，不是从 0 弹出来');
+  assert.doesNotMatch(enter[1], /scale\(0\)/, '不许 scale(0)');
 });
 
 /* ---------------- 假 store：驱动组件 ---------------- */
@@ -303,19 +383,23 @@ const { __test } = mod;
 
 test('设置：坏值一律兜底回默认', () => {
   assert.deepEqual(__test.normalizeSettings(null), __test.DEFAULT_SETTINGS);
-  assert.deepEqual(__test.normalizeSettings({ size: 'xxl', lines: 9, anim: 'boom', words: 'yes' }), {
-    size: 'm', lines: 1, anim: 'sweep', words: true, factsOnly: false,
+  assert.deepEqual(__test.normalizeSettings({ size: 'xxl', subLine: 'yes', anim: 'boom', words: 'yes' }), {
+    size: 'm', subLine: true, anim: 'calm', words: true, factsOnly: false,
     accent: 'theme', okColor: 'theme', badColor: 'theme', flavorStyle: 'tint',
   });
-  assert.deepEqual(__test.normalizeSettings({ size: 'l', lines: 3, anim: 'off', words: false, factsOnly: true }), {
-    size: 'l', lines: 3, anim: 'off', words: false, factsOnly: true,
+  assert.deepEqual(__test.normalizeSettings({ size: 'l', subLine: true, anim: 'off', words: false, factsOnly: true }), {
+    size: 'l', subLine: true, anim: 'off', words: false, factsOnly: true,
     accent: 'theme', okColor: 'theme', badColor: 'theme', flavorStyle: 'tint',
   });
+  // 老存档兼容：lines: 3 等价于 subLine: true；lines: 1 等价于 false。
+  assert.equal(__test.normalizeSettings({ lines: 3 }).subLine, true);
+  assert.equal(__test.normalizeSettings({ lines: 1 }).subLine, false);
+  assert.equal(__test.normalizeSettings({ subLine: false, lines: 3 }).subLine, false, '新字段优先');
 });
 
 test('设置：没有 localStorage 也不崩', () => {
   assert.deepEqual(__test.readSettings(), __test.DEFAULT_SETTINGS);
-  assert.doesNotThrow(() => __test.writeSettings({ size: 's', lines: 2, anim: 'dots', words: false }));
+  assert.doesNotThrow(() => __test.writeSettings({ size: 's', subLine: true, anim: 'dots', words: false }));
 });
 
 test('配色：选了色就挂 CSS 变量，跟随主题时一个都不挂', () => {
@@ -475,7 +559,7 @@ test('齿轮点开才出现面板（收起时 aria-hidden）', () => {
   assert.equal(panel[0].props['aria-hidden'], 'true');
 });
 
-test('字幕带设置面板：字号 / 行数 / 动画 / 俏皮词', () => {
+test('字幕带设置面板：字号 / 思考原话 / 动画 / 俏皮词', () => {
   const view = render({
     partial: { turn: 9, step: 0, blocks: [{ kind: 'reasoning', text: '看看配置' }] },
     runningCalls: [],
@@ -484,19 +568,22 @@ test('字幕带设置面板：字号 / 行数 / 动画 / 俏皮词', () => {
   const shown = text(view);
   assert.match(shown, /字幕设置/);
   assert.match(shown, /字号/);
-  assert.match(shown, /行数/);
+  assert.match(shown, /思考原话/);
   assert.match(shown, /动画/);
   assert.match(shown, /俏皮词/);
+  // 「行数」这个设置项已经删掉了：它原来只起「要不要显示副行」的开关作用，
+  // 名字却叫行数，实测开到 2/3 几乎没有视觉差别（主文案是整句，不折行）。
+  assert.doesNotMatch(shown, /行数/, '行数设置项应已移除');
   // 「没线索时」那一行：两个选项都用人话写出来，下面再补一句解释
   assert.match(shown, /没线索时/);
   assert.match(shown, /只报动作/);
   assert.match(shown, /猜一猜/);
   assert.match(shown, /猜错很正常/);
   assert.match(shown, /扫光/);
-  assert.match(shown, /呼吸点/);
-  assert.match(shown, /关闭/);
+  assert.match(shown, /安静/);
+  assert.match(shown, /全静止/);
   assert.match(view.props.className, /pgc-size-m/);
-  assert.match(view.props.className, /pgc-anim-sweep/);
+  assert.match(view.props.className, /pgc-anim-calm/);
 });
 
 test('把「没线索时」切到只报动作 → 选中项跟着变', () => {
@@ -851,7 +938,7 @@ test('同一动作换着说法：每条规则至少 3 种，且不同步数会�
   assert.notEqual(text(render(one)), text(render(two)));
 });
 
-test('副行：行数开到 2 才摘一句思考原话，行数 1 时不占地方', () => {
+test('副行：打开「思考原话」才摘一句，关着时不占地方', () => {
   assert.equal(__test.firstSentence('**先看 package.json** 的入口。后面再说'), '先看 package.json 的入口');
   assert.equal(__test.firstSentence(''), '');
 
@@ -862,10 +949,16 @@ test('副行：行数开到 2 才摘一句思考原话，行数 1 时不占地�
   };
   const previous = globalThis.localStorage;
   try {
-    globalThis.localStorage = { getItem: () => JSON.stringify({ lines: 2 }), setItem: () => {} };
+    globalThis.localStorage = { getItem: () => JSON.stringify({ subLine: true }), setItem: () => {} };
     const wide = render(data);
     assert.match(text(wide), /我先读取配置文件/);
 
+    globalThis.localStorage = { getItem: () => JSON.stringify({ subLine: false }), setItem: () => {} };
+    assert.doesNotMatch(text(render(data)), /我先读取配置文件/);
+
+    // 老存档（只有 lines 字段）也要按原样复活：lines>=2 视为打开。
+    globalThis.localStorage = { getItem: () => JSON.stringify({ lines: 2 }), setItem: () => {} };
+    assert.match(text(render(data)), /我先读取配置文件/);
     globalThis.localStorage = { getItem: () => JSON.stringify({ lines: 1 }), setItem: () => {} };
     assert.doesNotMatch(text(render(data)), /我先读取配置文件/);
   } finally {
