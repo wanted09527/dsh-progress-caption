@@ -151,6 +151,11 @@ ${strip('thinking', `
           </span>
           <span class="pgc-time">0.8s</span>
           <span class="pgc-flavor">盘算中</span>`, '', 2)}
+${strip('thinking', `
+          <span class="pgc-step">第 7 步</span>
+          <span class="pgc-dot" aria-hidden="true"></span>
+          <span class="pgc-text"><span class="pgc-label">npm test 跑完了 · 1.2s</span></span>
+          <span class="pgc-flavor">缓口气</span>`)}
       <div class="pgc-summary"><span class="pgc-summary-text">本回合 · 3 次工具 · 2 成 1 败 · 用时 12.4s</span></div>
     </div>
     <p class="doc">主文案是一整句（动作 + 具体对象），状态靠左侧蓝点与右侧胶囊的双色表示；最后一条是空闲齿轮 + 展开的设置面板。</p>

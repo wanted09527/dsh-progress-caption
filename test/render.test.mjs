@@ -699,7 +699,7 @@ test('动作人话：不同工具组用不同的动词，完成态换完成动�
   assert.equal(__test.actionText('mnemon_recall', '', 'running'), '正在执行 mnemon_recall');
 });
 
-test('阶段话术：工具间隙的思考说「刚干完什么，在想下一步」', () => {
+test('阶段话术：工具间隙只报「刚干完什么」，不写「在想下一步」这种空尾巴', () => {
   const nodes = [
     { kind: 'tool-result', seq: 12, callId: 'r1', name: 'read', time: 1000, callTime: 900, isError: false, content: [], args: {}, call: null, subCalls: [] },
     { kind: 'tool-result', seq: 13, callId: 'g1', name: 'grep', time: 2000, callTime: 1800, isError: false, content: [], args: {}, call: null, subCalls: [] },
@@ -708,7 +708,7 @@ test('阶段话术：工具间隙的思考说「刚干完什么，在想下一�
   const tools = __test.turnTools({ nodes, turnEnds: new Map([[0, 5]]), turn: 1 });
   assert.equal(tools.length, 3, '回合内 3 条结果');
   const phase = __test.phaseText(tools, 5000);
-  assert.equal(phase.text, '看完了 3 个文件，在想下一步');
+  assert.equal(phase.text, '看完了 3 个文件');
   assert.equal(phase.sinceMs, 2000);
 
   // 编辑过的 → 「刚改完 xxx」
@@ -716,7 +716,7 @@ test('阶段话术：工具间隙的思考说「刚干完什么，在想下一�
     { kind: 'tool-result', seq: 20, name: 'edit', time: 4000, callTime: 3000, isError: false,
       content: [], args: {}, call: { name: 'edit', argsRaw: '{"path":"E:/x/client.js"}' }, subCalls: [] },
   ], 9000);
-  assert.equal(phaseEdit.text, '刚改完 client.js，在想下一步');
+  assert.equal(phaseEdit.text, '刚改完 client.js');
 
   assert.equal(__test.phaseText([], 0), null);
 });
@@ -737,7 +737,7 @@ test('思考兜底链：规则 > 阶段话术 > 俏皮词', () => {
   const hitPhase = __test.deriveCaption({ ...base,
     partial: { turn: 1, step: 0, blocks: [{ kind: 'reasoning', text: '嗯……' }] } });
   assert.equal(hitPhase.ruleId, null);
-  assert.equal(hitPhase.phase, '看完了 1 个文件，在想下一步');
+  assert.equal(hitPhase.phase, '看完了 1 个文件');
 
   // 什么都没有 → 交给俏皮词
   const hitWord = __test.deriveCaption({ ...base, nodes: [], turnEnds: new Map(),
@@ -784,20 +784,47 @@ test('只看工具（factsOnly）：不读思考文本，没有工具就不显�
   assert.equal(running.target, 'ls');
 });
 
-test('思考没结束就不收起：两步之间的空档也要有字幕', () => {
-  // 回合还开着、partial 恰好为空（模型两步之间）→ 不能收
+test('两步之间的空档：报刚跑完的那条工具和耗时，没事实就不写空话', () => {
+  const nodes = [
+    { kind: 'tool-result', seq: 12, callId: 'b1', name: 'bash', time: 5000, callTime: 3800, isError: false,
+      content: [{ text: 'ok' }], args: {}, call: { name: 'bash', argsRaw: '{"command":"npm test"}' }, subCalls: [] },
+  ];
+  // 回合还开着、partial 恰好为空（模型两步之间）→ 不能收，且要说人话
   const gap = __test.deriveCaption({
-    partial: null, runningCalls: [], nodes: [],
-    turn: 4, turnOpen: true, waitingText: '正在准备下一步',
+    partial: null, runningCalls: [], nodes, turnEnds: new Map([[0, 5]]), turn: 4, turnOpen: true,
   });
   assert.ok(gap, '回合没结束就必须有内容');
   assert.equal(gap.state, 'thinking');
-  assert.equal(gap.phase, '正在准备下一步');
-  assert.equal(gap.key, 'wait:4');
+  assert.equal(gap.phase, 'npm test 跑完了 · 1.2s');
+  assert.equal(gap.key, 'wait:4:b1');
+
+  // 本回合什么都没跑过 → phase 留空，交给俏皮词，绝不能冒出「正在准备下一步」
+  const bare = __test.deriveCaption({
+    partial: null, runningCalls: [], nodes: [], turn: 4, turnOpen: true,
+  });
+  assert.ok(bare, '回合没结束就必须有内容');
+  assert.equal(bare.phase, null);
+  assert.equal(bare.key, 'wait:4:-');
+
   // 回合结束（turnEnds 里有这一轮）→ 这时才允许收
   assert.equal(__test.deriveCaption({
     partial: null, runningCalls: [], nodes: [], turn: 4, turnOpen: false,
   }), null);
+});
+
+test('空档话术只说事实：不到 1 秒不报时长，没有工具就返回 null', () => {
+  assert.equal(__test.gapText([], 0), null);
+  const quick = __test.gapText([
+    { kind: 'tool-result', seq: 9, callId: 'q1', name: 'read', time: 1200, callTime: 900, isError: false,
+      content: [], args: {}, call: { name: 'read', argsRaw: '{"path":"E:/x/a.js"}' }, subCalls: [] },
+  ], 2000);
+  assert.equal(quick.text, 'a.js 读完了');
+  assert.equal(quick.id, 'q1');
+  // 全部文案里不许再出现放之四海皆准的过场话
+  const zh = __test.DICT.zh;
+  Object.keys(zh).forEach((key) => {
+    assert.doesNotMatch(String(zh[key]), /正在准备下一步|在想下一步/, key + ' 里还有空话');
+  });
 });
 
 test('组件：partial 为空但工具还在跑时，字幕仍然挂着', () => {

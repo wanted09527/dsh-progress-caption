@@ -244,7 +244,7 @@ window.__ModuleLoader__.load({
       subagent: 'delegate', subagent_fork: 'delegate',
     };
 
-    /** 动词组 → 阶段（判断「看完了 N 个文件，在想下一步」这类话术）。 */
+    /** 动词组 → 阶段（判断「看完了 N 个文件」这类话术）。 */
     const GROUP_PHASES = {
       read: 'read', find: 'read', exec: 'exec', write: 'edit', edit: 'edit',
       web: 'web', delegate: 'delegate',
@@ -255,7 +255,6 @@ window.__ModuleLoader__.load({
         step: '第 {n} 步',
         thinking: '正在思考',
         writing: '正在组织回答',
-        waiting: '正在准备下一步',
         stateRunning: '进行中',
         stateOk: '成功',
         stateFail: '失败',
@@ -328,19 +327,31 @@ window.__ModuleLoader__.load({
         v_delegate_done: '小助手回来了',
         v_other_run: '正在执行',
         v_other_done: '完成了',
-        /* 阶段话术：工具间隙的思考，按「本回合刚干完什么」说人话 */
-        phase_read: '看完了 {n} 个文件，在想下一步',
-        phase_edit: '刚改完{target}，在想下一步',
-        phase_exec: '命令跑完了，在想下一步',
-        phase_web: '查完资料，在想下一步',
-        phase_delegate: '小助手回来了，在想下一步',
-        phase_other: '做完了 {n} 步，在想下一步',
+        /* 阶段话术：工具间隙的思考，按「本回合刚干完什么」说人话。
+           只说已经发生的事实，不写「在想下一步」这种放之四海皆准的尾巴。 */
+        phase_read: '看完了 {n} 个文件',
+        phase_edit: '刚改完{target}',
+        phase_exec: '命令跑完了',
+        phase_web: '查完资料',
+        phase_delegate: '小助手回来了',
+        phase_other: '这一轮跑了 {n} 步',
+        /* 两步之间的空档（工具刚回来、模型还没开口）：报「刚才那件事 + 花了多久」，
+           没有可报的事实就不写主文案，交给俏皮词。 */
+        waitFormat: '{what} · {time}',
+        waitFormatBare: '{what}',
+        w_exec: '跑完了',
+        w_read: '读完了',
+        w_find: '搜完了',
+        w_write: '写好了',
+        w_edit: '改好了',
+        w_web: '查完了',
+        w_delegate: '回来了',
+        w_other: '跑完了',
       },
       en: {
         step: 'Step {n}',
         thinking: 'thinking',
         writing: 'writing the answer',
-        waiting: 'getting ready for the next step',
         stateRunning: 'running',
         stateOk: 'done',
         stateFail: 'failed',
@@ -412,12 +423,22 @@ window.__ModuleLoader__.load({
         v_delegate_done: 'subagent returned',
         v_other_run: 'running',
         v_other_done: 'done with',
-        phase_read: 'read {n} files, thinking next',
-        phase_edit: 'just edited{target}, thinking next',
-        phase_exec: 'command finished, thinking next',
-        phase_web: 'web search done, thinking next',
-        phase_delegate: 'subagent returned, thinking next',
-        phase_other: 'did {n} steps, thinking next',
+        phase_read: 'read {n} files',
+        phase_edit: 'just edited{target}',
+        phase_exec: 'command finished',
+        phase_web: 'web search done',
+        phase_delegate: 'subagent came back',
+        phase_other: 'ran {n} steps this turn',
+        waitFormat: '{what} · {time}',
+        waitFormatBare: '{what}',
+        w_exec: 'command finished',
+        w_read: 'file read',
+        w_find: 'search done',
+        w_write: 'file written',
+        w_edit: 'edit done',
+        w_web: 'web search done',
+        w_delegate: 'subagent came back',
+        w_other: 'step finished',
       },
     };
 
@@ -634,7 +655,7 @@ window.__ModuleLoader__.load({
 
     /**
      * 本回合已完成的工具结果（用 seq 卡回合边界，全是事实，不猜）。
-     * 工具间隙模型又在思考时，靠它说「看完了 3 个文件，在想下一步」。
+     * 工具间隙模型又在思考时，靠它说「看完了 3 个文件」。
      */
     function turnTools(source) {
       const nodes = source && Array.isArray(source.nodes) ? source.nodes : EMPTY;
@@ -649,6 +670,30 @@ window.__ModuleLoader__.load({
         list.push(node);
       }
       return list;
+    }
+
+    /**
+     * 两步之间的空档话术：工具刚回来、模型还没开口的那一两秒。
+     * 只说「刚才那件事 + 花了多久」（都是事实），没有事实就返回 null——
+     * 这时上层的思考分支会退到俏皮词，绝不写「正在准备下一步」这种放之四海皆准的空话。
+     * @returns {null | {text: string, id: string}}
+     */
+    function gapText(tools, now) {
+      if (!tools || tools.length === 0) return null;
+      const last = tools[tools.length - 1];
+      const group = TOOL_VERB_GROUPS[last.name] || 'other';
+      const verb = translate('w_' + group);
+      const target = toolTarget(last);
+      const what = target ? target + ' ' + verb : verb;
+      const id = String(last.callId || last.seq || last.name || 'tool');
+      const ran = typeof last.callTime === 'number' && typeof last.time === 'number'
+        ? Math.max(0, last.time - last.callTime)
+        : null;
+      // 超过一秒才报时长；零点几秒报出来反而是噪音。
+      if (ran !== null && ran >= 1000) {
+        return { text: fmt(translate('waitFormat'), { what, time: durationText(ran) }), id };
+      }
+      return { text: fmt(translate('waitFormatBare'), { what }), id };
     }
 
     /**
@@ -911,15 +956,18 @@ window.__ModuleLoader__.load({
       // 也不能让字幕收起来——用户要的是「思考没结束就一直挂着」。
       if (!partial && calls.length === 0) {
         if (!source.turnOpen || turn === null) return null;
+        // 空档时只报事实：本回合刚跑完的那条工具 + 它花了多久。
+        // 没事实可报就把 phase 留空，上层会退到俏皮词——不写「正在准备下一步」这种空话。
+        const done = gapText(turnTools({ nodes, turnEnds: source.turnEnds, turn }), now);
         return {
-          key: 'wait:' + turn,
+          key: 'wait:' + turn + ':' + (done ? done.id : '-'),
           state: 'thinking',
           turn,
           step: null,
           tool: '',
           target: '',
           ruleId: null,
-          phase: source.waitingText || '',
+          phase: done ? done.text : null,
           elapsedMs: null,
           kind: null,
           code: null,
@@ -1112,7 +1160,6 @@ window.__ModuleLoader__.load({
           factsOnly: settings.factsOnly,
           turn: openTurn,
           turnOpen: openTurn !== null,
-          waitingText: t('waiting'),
         }),
         [partial, runningCalls, nodes, now, settings.factsOnly, openTurn, t],
       );
@@ -1753,6 +1800,7 @@ window.__ModuleLoader__.load({
         toolTarget,
         actionText,
         turnTools,
+        gapText,
         phaseText,
         summarizeTurn,
         readSettings,
