@@ -119,20 +119,20 @@ ${strip('running', `
           <span class="pgc-step">第 3 步</span>
           <span class="pgc-loader" aria-hidden="true"><span class="pgc-dot"></span><span class="pgc-dot"></span><span class="pgc-dot"></span></span>
           <span class="pgc-label">正在执行命令 npm test</span>
-          <span class="pgc-slot" aria-hidden="true"><span class="pgc-loop"><span class="pgc-loop-dot"></span><span class="pgc-loop-dot"></span><span class="pgc-loop-dot"></span></span></span>
+          <span class="pgc-slot" aria-hidden="true"><span class="pgc-arc"></span></span>
           <span class="pgc-flavor">琢磨中</span>`)}
 ${strip('ok', `
           <span class="pgc-step">第 4 步</span>
           <span class="pgc-loader" aria-hidden="true"><span class="pgc-dot"></span><span class="pgc-dot"></span><span class="pgc-dot"></span></span>
           <span class="pgc-label">命令完成 npm test</span>
           <span class="pgc-chip">成功</span>
-          <span class="pgc-slot" aria-hidden="true"><span class="pgc-loop"><span class="pgc-loop-dot"></span><span class="pgc-loop-dot"></span><span class="pgc-loop-dot"></span></span></span>`)}
+          <span class="pgc-slot" aria-hidden="true"><span class="pgc-arc"></span></span>`)}
 ${strip('error', `
           <span class="pgc-step">第 5 步</span>
           <span class="pgc-loader" aria-hidden="true"><span class="pgc-dot"></span><span class="pgc-dot"></span><span class="pgc-dot"></span></span>
           <span class="pgc-label">命令执行失败（exit code 1）</span>
           <span class="pgc-chip">失败</span>
-          <span class="pgc-slot" aria-hidden="true"><span class="pgc-loop"><span class="pgc-loop-dot"></span><span class="pgc-loop-dot"></span><span class="pgc-loop-dot"></span></span></span>`, `
+          <span class="pgc-slot" aria-hidden="true"><span class="pgc-arc"></span></span>`, `
         <details class="pgc-detail">
           <summary class="pgc-detail-sum">看原始报错</summary>
           <code class="pgc-raw">boom\n[exit code: 1]</code>
@@ -149,16 +149,16 @@ ${strip('thinking', `
             <span class="pgc-label">看看配置里怎么写的</span>
             <span class="pgc-sub">先看 package.json 的入口，再决定改哪里</span>
           </span>
-          <span class="pgc-slot" aria-hidden="true"><span class="pgc-loop"><span class="pgc-loop-dot"></span><span class="pgc-loop-dot"></span><span class="pgc-loop-dot"></span></span></span>
+          <span class="pgc-slot" aria-hidden="true"><span class="pgc-arc"></span></span>
           <span class="pgc-flavor">盘算中</span>`)}
 ${strip('thinking', `
           <span class="pgc-step">第 8 步</span>
           <span class="pgc-loader" aria-hidden="true"><span class="pgc-dot"></span><span class="pgc-dot"></span><span class="pgc-dot"></span></span>
           <span class="pgc-text">
-            <span class="pgc-label">扫光档：光带只划第一行</span>
-            <span class="pgc-sub">这一行是思考原话，不参与扫光</span>
+            <span class="pgc-label">扫光档：光带横扫整条字幕</span>
+            <span class="pgc-sub">第二行也跟着一起扫，不是只扫第一行</span>
           </span>
-          <span class="pgc-slot" aria-hidden="true"><span class="pgc-loop"><span class="pgc-loop-dot"></span></span></span>
+          <span class="pgc-slot" aria-hidden="true"><span class="pgc-arc"></span></span>
           <span class="pgc-flavor">琢磨中</span>`, '', 'sweep')}
 ${strip('thinking', `
           <span class="pgc-step">第 7 步</span>

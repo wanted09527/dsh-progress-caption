@@ -191,22 +191,27 @@ test('整条字幕条没有无限动画；小圆点在安静档只做呼吸，�
     '起跳只许动 transform，别改宽高（会重排、会抖）');
 });
 
-test('扫光只扫第一行、方向从左到右、光带窄于整行', () => {
-  const after = /\.pgc-anim-sweep \.pgc-label::after \{([\s\S]*?)\n\}/.exec(sheet);
-  assert.ok(after, '要有 .pgc-anim-sweep .pgc-label::after');
+test('扫光横扫整条、方向从左到右、光带与整框同宽', () => {
+  const after = /\.pgc-anim-sweep \.pgc-band::after \{([\s\S]*?)\n\}/.exec(sheet);
+  assert.ok(after, '要有 .pgc-anim-sweep .pgc-band::after');
   const rule = after[1].replace(/\/\*[\s\S]*?\*\//g, '');
-  // 只扫第一行：光带挂在 .pgc-label 上，且第二行必须显式关掉。
+  // 整条扫：光带挂在裁剪框 .pgc-band 上，不再只挂第一行。
+  const labelAfter = /\.pgc-anim-sweep \.pgc-label::after \{([\s\S]*?)\n\}/.exec(sheet);
+  assert.ok(labelAfter, '主文案上的老光带规则要保留一行显式关掉');
+  assert.match(labelAfter[1], /content: none/, '主文案自己不再挂扫光（整条已经一起扫）');
+  // 副行必须同样显式关掉，否则两层光会叠在一起。
   assert.match(sheet, /\.pgc-anim-sweep \.pgc-sub::after \{ content: none; animation: none; \}/,
     '副行（第二行）必须不扫');
-  // 不整条扫：光带只有这一行的 40% 宽，且不再靠 background-size 撑满。
-  assert.match(rule, /width: 40%/, '光带要窄，不能铺满整行');
-  assert.doesNotMatch(rule, /inset: 0/, 'inset: 0 会让光带铺满整条');
+  // 光带与整框同宽：宽度写 100%，配合 -100% → 100% 就是一整道横扫过去。
+  assert.match(rule, /width: 100%/, '光带就是整框那么宽');
+  assert.doesNotMatch(rule, /width: 40%/, '40% 是旧版窄光带，会变成「中间闪一下」');
+  assert.match(rule, /transform: translateX\(-100%\)/, '起点藏在左边界外');
   assert.doesNotMatch(rule, /background-size/, '整条底色一起亮就是「整条一起扫」');
-  // 左到右：从 -100%（藏在左边外面）走到正数（越过右边界）。
+  // 左到右：从 -100%（藏在左边外面）走到 100%（完全越过右边界）。
   const sweep = /@keyframes pgc-sweep \{([\s\S]*?)\n\}/.exec(sheet);
   assert.ok(sweep, '要有 pgc-sweep');
   assert.match(sweep[1], /0% \{ transform: translateX\(-100%\); \}/, '起点在左边界外面');
-  assert.match(sweep[1], /100% \{ transform: translateX\(350%\); \}/, '终点越过右边界');
+  assert.match(sweep[1], /100% \{ transform: translateX\(100%\); \}/, '终点越过右边界');
   assert.doesNotMatch(sweep[1], /background-position/, '老实现是右到左，必须彻底换掉');
   assert.doesNotMatch(sweep[1], /\b(width|height|margin|padding|top|left|right|bottom):/,
     '扫光只许动 transform');
@@ -254,6 +259,22 @@ test('换文案的动画从半透明起步，不是从 0 闪出来', () => {
     '换文案不许改尺寸或位置属性');
 });
 
+test('整轮最前面几步不播换文案动画：只关「换字」，不关入场', () => {
+  assert.equal(__test.SETTLE_STEPS, 3, '前 3 步是状态翻得最勤的一段');
+  const rule = /\.pgc-strip--settle \.pgc-flavor,\s*\n\s*\.pgc-strip--settle \.pgc-label \{ animation: none; \}/;
+  assert.match(sheet, rule, '前几步换文案一律硬切换');
+  assert.doesNotMatch(sheet, /\.pgc-strip--settle \.pgc-live \{/,
+    '入场动画一次出现只播一次，不是闪烁来源，别一起关掉');
+  // 步号整轮常驻：空档时沿用上一个非空步号，不许把「第 N 步」整块摘掉。
+  const view = render({
+    partial: null,
+    runningCalls: [{ callId: 'c9', name: 'bash', step: 4, time: Date.now() - 600 }],
+    nodes: [],
+    turnEnds: new Map(),
+  });
+  assert.match(text(view), /第 4 步/, '空档里步号必须还在');
+});
+
 test('入场只播一次，挂在内容层而不是整条根节点', () => {
   const stripRule = /\.pgc-strip \{([\s\S]*?)\}/.exec(sheet)[1];
   assert.doesNotMatch(stripRule, /animation:/, '根节点挂动画会被每次重渲染重播，就是闪');
@@ -294,7 +315,9 @@ test('状态一：工具在跑 → 第 N 步 / 正在执行命令（进行中由
     nodes: [],
   });
   const shown = text(view);
-  assert.match(shown, /第 3 步/);
+  // 宿主发出来的 step 本来就是 1 起（真实会话日志核过），这里原样透传：
+  // 传进来的 step 是 2，就该显示「第 2 步」，不能多算一步。
+  assert.match(shown, /第 2 步/);
   assert.match(shown, /正在执行命令/);
   assert.doesNotMatch(shown, /\d+\.\ds/, '耗时已撤掉：思维链区域已经显示过，这里不再重复');
   assert.match(view.props.title, /规则推断/);
@@ -305,13 +328,14 @@ test('状态二：思考文本命中规则表 → 正在读取配置文件', () 
   const view = render({
     partial: {
       turn: 3,
-      step: 0,
+      step: 1,
       blocks: [{ kind: 'reasoning', text: '我先读取配置文件 package.json，看看入口在哪' }],
     },
     runningCalls: [],
     nodes: [],
   });
   const shown = text(view);
+  // step 是 1 起：传 1 就显示「第 1 步」（真实宿主不会发 step: 0）。
   assert.match(shown, /第 1 步/);
   assert.match(shown, /(正在读取配置文件|翻一下配置文件|看看配置里怎么写的|对一下配置项)/);
   assert.match(view.props.className, /pgc-strip--thinking/);
@@ -746,7 +770,13 @@ test('动作人话：不同工具组用不同的动词，完成态换完成动�
   assert.equal(__test.actionText('write', 'a.js', 'running'), '正在写 a.js');
   assert.equal(__test.actionText('edit', 'a.js', 'ok'), '改好了 a.js');
   assert.equal(__test.actionText('subagent', '审查', 'running'), '派了小助手 审查');
-  assert.equal(__test.actionText('mnemon_recall', '', 'running'), '正在执行 mnemon_recall');
+  // 以前这些高频工具全掉进 'other'，只能把工具名直接糊进句子（「正在执行 mnemon_recall」）。
+  assert.equal(__test.actionText('mnemon_recall', '', 'running'), '正在翻记忆');
+  assert.equal(__test.actionText('read_image', 'a.png', 'running'), '正在读 a.png');
+  assert.equal(__test.actionText('present', '', 'running'), '正在出交付物');
+  assert.equal(__test.actionText('todo_write', '', 'ok'), '理好计划');
+  // 真的没归类的才落到 other。
+  assert.equal(__test.actionText('cordis_inspect_query', '', 'running'), '正在执行 cordis_inspect_query');
 });
 
 test('阶段话术：工具间隙只报「刚干完什么」，不写「在想下一步」这种空尾巴', () => {
@@ -757,18 +787,23 @@ test('阶段话术：工具间隙只报「刚干完什么」，不写「在想�
   ];
   const tools = __test.turnTools({ nodes, turnEnds: new Map([[0, 5]]), turn: 1 });
   assert.equal(tools.length, 3, '回合内 3 条结果');
-  const phase = __test.phaseText(tools, 5000);
+  const phase = __test.phaseText(tools);
   assert.equal(phase.text, '看完了 3 个文件');
-  assert.equal(phase.sinceMs, 2000);
 
   // 编辑过的 → 「刚改完 xxx」
   const phaseEdit = __test.phaseText([
     { kind: 'tool-result', seq: 20, name: 'edit', time: 4000, callTime: 3000, isError: false,
       content: [], args: {}, call: { name: 'edit', argsRaw: '{"path":"E:/x/client.js"}' }, subCalls: [] },
-  ], 9000);
+  ]);
   assert.equal(phaseEdit.text, '刚改完 client.js');
 
-  assert.equal(__test.phaseText([], 0), null);
+  assert.equal(__test.phaseText([]), null);
+  // 空档话术同理：只报事实，不再吃 now。
+  assert.equal(__test.gapText([]), null);
+  assert.equal(__test.gapText([
+    { kind: 'tool-result', seq: 21, name: 'read', time: 5000, callTime: 4500, isError: false,
+      content: [], args: {}, call: { name: 'read', argsRaw: '{"path":"E:/x/a.js"}' }, subCalls: [] },
+  ]).text, 'a.js 读完了');
 });
 
 test('思考兜底链：规则 > 阶段话术 > 俏皮词', () => {
@@ -798,7 +833,8 @@ test('思考兜底链：规则 > 阶段话术 > 俏皮词', () => {
 
 test('成功态会自己收起（5 秒），标签稳定窗口会随速度变', () => {
   assert.equal(__test.OK_LINGER_MS, 5000);
-  assert.equal(__test.LABEL_HOLD_MS, 350);
+  // 稳定窗口拉长到 520ms（原来 350ms）：前几步文案换得勤，350ms 还是会让人看见跳字。
+  assert.equal(__test.LABEL_HOLD_MS, 520);
   assert.equal(__test.LABEL_HOLD_FAST_MS, 800);
   assert.ok(__test.FAST_CPS > 0, '快思考阈值必须为正');
 });
@@ -939,7 +975,7 @@ test('有俏皮词时让位给词，没词时显示「进行中」，俏皮词�
   assert.equal(classes[classes.length - 1], 'pgc-flavor', '俏皮词固定在最右');
 });
 
-test('耗时位换成三点循环：宽高写死，点在槽里，且排队在俏皮词左边', () => {
+test('耗时位换成旋转弧线：宽高写死，弧线在槽里，且排在俏皮词左边', () => {
   const view = render({
     partial: { turn: 3, step: 0, blocks: [{ kind: 'reasoning', text: '我先读取配置文件 package.json' }] },
     runningCalls: [],
@@ -959,34 +995,27 @@ test('耗时位换成三点循环：宽高写死，点在槽里，且排队在�
   assert.ok(slot, '动画位必须在（删了版面会位移）');
   assert.equal(slot.props['data-pgc-slot'], 'loop', '给人看的标记');
   assert.equal(slot.props['aria-hidden'], true, '只是装饰，别让读屏念出来');
-  const loop = (slot.children || []).filter(Boolean);
-  assert.equal(loop.length, 1, '槽里装一层循环容器');
-  assert.equal(loop[0].props.className, 'pgc-loop');
-  const dots = (loop[0].children || []).filter(Boolean);
-  assert.equal(dots.length, 3, 'Claude 那种三点');
-  dots.forEach((d) => assert.equal(d.props.className, 'pgc-loop-dot'));
+  const arc = (slot.children || []).filter(Boolean);
+  assert.equal(arc.length, 1, '槽里只装一根弧线');
+  assert.equal(arc[0].props.className, 'pgc-arc');
   assert.ok(classes.indexOf('pgc-slot') < classes.indexOf('pgc-flavor'), '动画位排在俏皮词左边');
   assert.ok(!classes.includes('pgc-time'), '耗时那一格已经撤掉了');
 
-  // 尺寸写死：以后改动画怎么跳，都不会把左右两边挤动。
+  // 尺寸写死：以后改动画怎么转，都不会把左右两边挤动。
   const rule = /\.pgc-slot \{([\s\S]*?)\}/.exec(sheet);
   assert.ok(rule, '要有 .pgc-slot 规则');
   assert.match(rule[1], /width: 3\.6em/, '宽度与原耗时格一致，俏皮词位置不变');
   assert.match(rule[1], /height:/, '高度也要锁住');
   assert.match(rule[1], /flex: 0 0 auto/, '不许被压缩');
 
-  // 三点只许动合成层属性。
-  const dot = /\.pgc-loop-dot \{([\s\S]*?)\}/.exec(sheet);
-  assert.ok(dot, '要有 .pgc-loop-dot 规则');
-  assert.match(dot[1], /animation: pgc-loop-bounce/, '默认就在跳');
-  const hasKey = (name) => new RegExp(`@keyframes ${name} \\{[\\s\\S]*?\\n\\}`).exec(sheet);
-  for (const name of ['pgc-loop-bounce', 'pgc-loop-bounce-big']) {
-    const frames = hasKey(name);
-    assert.ok(frames, `要有 @keyframes ${name}`);
-    const body = frames[0];
-    assert.doesNotMatch(body, /\b(width|height|margin|padding|top|left|right|bottom):/, `${name} 只许动 transform/opacity`);
-    assert.match(body, /transform:/, `${name} 必须真的动起来`);
-  }
+  // 弧线只许动合成层属性。
+  const arcRule = /\.pgc-arc \{([\s\S]*?)\}/.exec(sheet);
+  assert.ok(arcRule, '要有 .pgc-arc 规则');
+  assert.match(arcRule[1], /animation: pgc-spin/, '默认就在转');
+  const frames = /@keyframes pgc-spin \{[\s\S]*?\n\}/.exec(sheet);
+  assert.ok(frames, '要有 @keyframes pgc-spin');
+  assert.doesNotMatch(frames[0], /\b(width|height|margin|padding|top|left|right|bottom):/, 'pgc-spin 只许动 transform');
+  assert.match(frames[0], /transform:/, 'pgc-spin 必须真的动起来');
   assert.match(sheet, /@media \(prefers-reduced-motion: reduce\)/, '系统降级仍然保留');
 });
 
@@ -1118,21 +1147,124 @@ test('副行挑句：不再摘第一句过场话，而是挑有判断/有具体�
   assert.ok(text0.includes(one.replace(/…$/, '')), '不许改写原文：' + one);
 });
 
-test('耗时不到 1 秒不显示，免得挂个「0.0s」像坏了', () => {
+test('耗时字段已彻底移除：字幕条上不再有「秒」这个东西', () => {
   const data = {
-    partial: { turn: 3, step: 0, blocks: [{ kind: 'reasoning', text: '想了想' }] },
+    partial: { turn: 3, step: 1, blocks: [{ kind: 'reasoning', text: '想了想' }] },
     runningCalls: [],
     nodes: [],
     turnEnds: new Map([[2, 100]]),
   };
-  const quick = __test.deriveCaption({ ...data, now: 500 });
-  assert.equal(quick.elapsedMs, null, '思考态没有起点时本来就没有耗时');
+  // 以前这里有个 elapsedMs，每秒刷新一次却没人读——既白渲染又不准，已整条删掉。
+  const quick = __test.deriveCaption(data);
+  assert.equal(quick.elapsedMs, undefined, 'elapsedMs 字段应已不存在');
 
-  const running = __test.deriveCaption({
+  const shown = text(render({
     ...data,
-    runningCalls: [{ callId: 'c9', name: 'bash', step: 0, time: 10_000, argsRaw: '{"command":"ls"}' }],
-    now: 10_400,
+    runningCalls: [{ callId: 'c9', name: 'bash', step: 1, time: Date.now() - 400, argsRaw: '{"command":"ls"}' }],
+  }));
+  assert.doesNotMatch(shown, /\d+\.\d\s?s/, '条上不该再出现任何耗时');
+});
+
+/* ---------------- 回合级结局：宿主的结论，不是猜的 ---------------- */
+
+test('回合级失败：turn-error 会让字幕说「这一轮没跑完」，不再停在正在思考', () => {
+  const view = __test.deriveCaption({
+    partial: null,
+    turnOpen: true,
+    runningCalls: [],
+    nodes: [{
+      kind: 'turn-error',
+      seq: 40,
+      time: 4000,
+      turn: 3,
+      step: 2,
+      message: 'upstream 502',
+      code: 'UPSTREAM_ERROR',
+    }],
+    turnEnds: new Map(),
+    turn: 3,
   });
-  assert.equal(running.elapsedMs, 400);
-  assert.doesNotMatch(text(render({ ...data, runningCalls: [{ callId: 'c9', name: 'bash', step: 0, time: Date.now() - 400, argsRaw: '{"command":"ls"}' }] })), /\d\.\d\ss/);
+  assert.ok(view, '不能因为 partial 空就收起来');
+  assert.equal(view.state, 'error');
+  assert.equal(view.kind, 'error');
+  assert.equal(view.code, 'UPSTREAM_ERROR');
+  assert.match(view.rawLine || '', /502/, '原始报错要能展开看');
+});
+
+test('被用户自己停的（INTERRUPTED）措辞分开，不说成「模型报错」', () => {
+  const view = __test.deriveCaption({
+    partial: null,
+    turnOpen: true,
+    runningCalls: [],
+    nodes: [{ kind: 'turn-error', seq: 41, time: 4100, turn: 4, step: 1, message: 'stopped', code: 'INTERRUPTED' }],
+    turnEnds: new Map(),
+    turn: 4,
+  });
+  assert.equal(view.kind, 'interrupted');
+});
+
+test('输出到上限（turn-max-tokens）单独一个说法', () => {
+  const view = __test.deriveCaption({
+    partial: null,
+    turnOpen: true,
+    runningCalls: [],
+    nodes: [{ kind: 'turn-max-tokens', seq: 42, time: 4200, turn: 5, step: 1, message: 'max tokens' }],
+    turnEnds: new Map(),
+    turn: 5,
+  });
+  assert.equal(view.kind, 'maxtokens');
+});
+
+test('上一轮的旧报错不许翻出来：只认当前这一轮', () => {
+  const nodes = [{ kind: 'turn-error', seq: 30, time: 3000, turn: 2, step: 1, message: 'old', code: 'OLD' }];
+  const view = __test.deriveCaption({
+    partial: { turn: 3, step: 1, blocks: [{ kind: 'reasoning', text: '继续干活' }] },
+    runningCalls: [],
+    nodes,
+    turnEnds: new Map([[2, 30]]),
+  });
+  assert.notEqual(view.state, 'error', '旧回合的报错不能算到新回合头上');
+});
+
+test('上游在退避重试：说第几次，而不是干等「正在思考」', () => {
+  const view = __test.deriveCaption({
+    partial: { turn: 6, step: 2, blocks: [{ kind: 'reasoning', text: '等一下' }] },
+    runningCalls: [],
+    nodes: [{
+      kind: 'model-retry', seq: 50, time: 5000, turn: 6, retryState: 'scheduled',
+      retry: 2, maxRetries: 5, delayMs: 2000, failure: { code: 'RATE_LIMITED' },
+    }],
+    turnEnds: new Map(),
+  });
+  assert.equal(view.retry.n, 2);
+  const shown = text(render({
+    partial: { turn: 6, step: 2, blocks: [{ kind: 'reasoning', text: '等一下' }] },
+    runningCalls: [],
+    nodes: [{
+      kind: 'model-retry', seq: 50, time: 5000, turn: 6, retryState: 'scheduled',
+      retry: 2, maxRetries: 5, delayMs: 2000, failure: { code: 'RATE_LIMITED' },
+    }],
+    turnEnds: new Map(),
+  }));
+  assert.match(shown, /第 2 次重试/);
+});
+
+test('重试已经开始（started）就不再说「等待中」', () => {
+  const view = __test.deriveCaption({
+    partial: { turn: 7, step: 1, blocks: [{ kind: 'reasoning', text: '继续' }] },
+    runningCalls: [],
+    nodes: [{ kind: 'model-retry', seq: 51, time: 5100, turn: 7, retryState: 'started', retry: 1 }],
+    turnEnds: new Map(),
+  });
+  assert.ok(!view.retry, 'started 就是正常在跑了');
+});
+
+test('工具事实优先于回合结局：报错之后又跑起来，就照实报在跑什么', () => {
+  const view = __test.deriveCaption({
+    partial: { turn: 8, step: 2, blocks: [] },
+    runningCalls: [{ callId: 'c1', name: 'bash', step: 2, time: Date.now(), argsRaw: '{"command":"npm test"}' }],
+    nodes: [{ kind: 'turn-error', seq: 60, time: 6000, turn: 8, step: 1, message: 'x', code: 'X' }],
+    turnEnds: new Map(),
+  });
+  assert.equal(view.state, 'running', '手头真的在跑东西，就先说在跑什么');
 });

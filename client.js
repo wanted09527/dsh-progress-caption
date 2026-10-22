@@ -42,8 +42,10 @@ window.__ModuleLoader__.load({
     /** 俏皮词轮换节奏。 */
     // 俏皮词换得太勤会像弹幕，慢一点：2.8 秒换一个。
     const WORD_MS = 2800;
-    /** 文案的稳定窗口：候选标签要稳住这么久才换，避免模型快速思考时标签乱闪。 */
-    const LABEL_HOLD_MS = 350;
+    /** 文案的稳定窗口：候选标签要稳住这么久才换，避免模型快速思考时标签乱闪。
+     *  350ms 实测还是太短——模型前几步状态翻得最勤，350ms 就换一次文字，
+     *  人眼看到的是「一直在改」。放宽到 520ms，宁可慢半拍，也不要晃。 */
+    const LABEL_HOLD_MS = 520;
     /** 思考特别快时的稳定窗口：一秒钟最多换一次多一点，人眼跟得上。 */
     const LABEL_HOLD_FAST_MS = 800;
     /** 每秒新增多少个字就算「思考很快」。 */
@@ -52,9 +54,11 @@ window.__ModuleLoader__.load({
     const OK_LINGER_MS = 5000;
     /** 一条字幕最少挂多久：模型想得快时状态零点几秒就结束，留够人读完一行的时间。 */
     const MIN_SHOW_MS = 2600;
-    /** 计时器刷新间隔：400ms 会让「1.2s」的小数位每 400ms 抖一次，看着像闪；
-     *  改成 1 秒只动一次，读数仍然准（秒级本来就够了）。 */
-    const NOW_MS = 1000;
+    /** 整轮刚开始的这几步不播「换文案淡入」。
+     *  前几步是所有状态翻得最勤的地方（思考 → 派工具 → 回来 → 再思考），
+     *  淡入动画一秒能重播两三次，叠起来就是「一直在闪」。这几步改成硬切换，
+     *  第 4 步之后状态稳下来，再恢复成淡入。 */
+    const SETTLE_STEPS = 3;
     /** 动画档位：calm = 只有小圆点轻轻呼吸（默认，最不打扰）；sweep = 文字扫光；off = 全静止。 */
     const ANIMS = ['calm', 'sweep', 'off'];
     /** 两步之间 partial 会短暂为空；这段时间（毫秒）内仍算「这一轮还在跑」，字幕不许收。 */
@@ -66,108 +70,137 @@ window.__ModuleLoader__.load({
     /* ------------------------------------------------------------------ *
      * 规则表：加一条 = 在数组里加一个对象，文案会自动并进字典（r_<id>）。
      * hit 里的每条正则都要命中（AND），大小写不敏感由正则自带 /i 决定。
+     *
+     * 【为什么英文词都套了 \b】以前 `run|build|step|type|api` 这种裸单字会命中
+     * 一大片无关文本（runtime 命中 run、typeset 命中 type），实测 2000 条真实思考里
+     * 有 56.9% 至少命中一个裸泛词。词边界能把这类误命中挡掉大半。
+     *
+     * 【为什么删掉了 run / step / type / api / build】它们在任何一段技术文本里都太常见，
+     * 却几乎不携带「这一刻在干什么」的信息。宁可没命中（退回阶段话术或俏皮词），
+     * 也好过为了凑命中率随口猜错。
+     *
+     * 【w 是权重】给「说了就基本确定」的词加分（定位问题、对比方案），
+     * 给大词减分（搜代码、跑命令）。多个规则同时命中时靠它排出先后，
+     * 而不是靠数组书写顺序——那样超过一半的样本文案是随手排出来的。
      * ------------------------------------------------------------------ */
     const RULES = [
       {
         id: 'read-config',
-        hit: [/读|查看|read/i, /配置|设置|config|package\.json|\.env|\.json/i],
+        hit: [/读|查看|\bread\b/i, /配置|设置|\bconfig\b|package\.json|\.env\b|\.json\b/i],
+        w: 1.05,
         zh: '正在读取配置文件',
         en: 'reading a config file',
       },
       {
         id: 'search-code',
-        hit: [/搜索|查找|定位|搜一下|grep|search|find/i],
+        hit: [/搜索|查找|定位|搜一下|\bgrep\b|\bsearch\b|\bfind\b|\brg\b/i],
+        w: 0.9,
         zh: '正在搜索代码',
         en: 'searching the code',
       },
       {
         id: 'edit-code',
-        hit: [/修改|编辑|改成|写入|补上|edit|write|patch/i],
+        hit: [/修改|编辑|改成|写入|补上|\bedit\b|\bwrite\b|\bpatch\w*\b/i],
+        w: 1,
         zh: '正在修改代码',
         en: 'editing the code',
       },
       {
         id: 'run-tests',
-        hit: [/测试|用例|跑一遍|test|spec|vitest|jest/i],
+        hit: [/测试|用例|跑一遍|\btests?\b|\bspec\b|\bvitest\b|\bjest\b/i],
+        w: 1,
         zh: '正在跑测试',
         en: 'running tests',
       },
       {
         id: 'install-deps',
-        hit: [/安装|依赖|install|pnpm|npm i|dependenc/i],
+        hit: [/安装|依赖|\binstall\b|\bpnpm\b|\bnpm i\b|\bdependenc/i],
+        w: 1.1,
         zh: '正在安装依赖',
         en: 'installing dependencies',
       },
       {
         id: 'run-command',
-        hit: [/运行|执行|跑一下|命令|run|execute|command|build/i],
+        hit: [/运行|执行|跑一下|命令|\bcommand\b|\bexecute\b|\bbash\b|\bpwsh\b/i],
+        w: 0.9,
         zh: '正在运行命令',
         en: 'running a command',
       },
       {
         id: 'check-types',
-        hit: [/\.d\.ts|类型|接口|签名|type|api|signature/i],
+        hit: [/\.d\.ts\b|类型|接口|签名|\btypescript\b|\binterface\b|\bsignature\b|\btype ?error\b/i],
+        w: 1.05,
         zh: '正在查接口类型',
         en: 'checking the API types',
       },
       {
         id: 'plan',
-        hit: [/计划|步骤|方案|先.*再|plan|approach|step/i],
+        hit: [/计划|步骤|方案|先.*再|\bplan\w*\b|\bapproach\b/i],
+        w: 0.85,
         zh: '正在梳理方案',
         en: 'working out an approach',
       },
       /* ---- 下面是按「AI 常见思考动作」补的第二批：更贴近模型真实内心戏 ---- */
       {
         id: 'understand',
-        hit: [/理解|分析|明确|梳理一下|弄清楚|看懂|understand|make sense of|analy[sz]e the/i],
+        hit: [/理解|分析|明确|梳理一下|弄清楚|看懂|\bunderstand\b|\bmakes? sense of\b|\banaly[sz]e\b/i],
+        w: 0.9,
         zh: '正在理解你的需求',
         en: 'understanding the request',
       },
       {
         id: 'recall-context',
-        hit: [/回顾|回忆|之前的对话|上下文|上文|刚才说|earlier|the context|previous message/i],
+        hit: [/回顾|回忆|之前的对话|上下文|上文|刚才说|\bcontext\b|\bearlier\b|previous message/i],
+        w: 1.05,
         zh: '正在回顾上下文',
         en: 'reviewing the context',
       },
       {
         id: 'locate-bug',
-        hit: [/定位|排查|问题出在|哪儿错|哪里错|根源|root cause|what.*wrong|bug在哪|症结/i],
+        hit: [/定位|排查|问题出在|哪儿错|哪里错|根源|症结|root cause|what.{0,20}wrong|\bbug\b/i],
+        w: 1.15,
         zh: '正在定位问题',
         en: 'locating the problem',
       },
       {
         id: 'compare-plans',
-        hit: [/对比|比较一下|两种方案|三个方案|方案[AB12]|权衡|哪个更好|compare|versus|trade-?off/i],
+        hit: [/对比|比较一下|两种方案|三个方案|方案[AB12]|权衡|哪个更好|\bcompare\b|\bversus\b|\btrade-?offs?\b/i],
+        w: 1.15,
         zh: '正在对比方案',
         en: 'comparing approaches',
       },
       {
         id: 'decide',
-        hit: [/我决定|我打算|采用|就用这|选这|先这样|那就|decide|go with|settle on/i],
+        hit: [/我决定|我打算|采用|就用这|选这|先这样|那就|\bdecide\b|go with|settle on/i],
+        w: 1.1,
         zh: '正在定方案',
         en: 'settling on an approach',
       },
       {
         id: 'verify',
-        hit: [/验证|检查一下|确认|核对|再看看对不对|verify|double-?check|confirm/i],
+        hit: [/验证|检查一下|确认|核对|再看看对不对|\bverify\b|double-?check|\bconfirm\b/i],
+        w: 1,
         zh: '正在检查验证',
         en: 'verifying the result',
       },
       {
         id: 'summarize',
-        hit: [/总结|归纳|综上|概括|整体来看|梳理完|summar|to sum up|overall/i],
+        hit: [/总结|归纳|综上|概括|整体来看|梳理完|\bsummar/i],
+        w: 1.1,
         zh: '正在总结归纳',
         en: 'summarizing findings',
       },
       {
         id: 'risk',
-        hit: [/风险|担心|可能会出问题|注意别|小心|有坑|副作用|risk|careful|side effect|caution/i],
+        hit: [/风险|担心|可能会出问题|注意别|小心|有坑|副作用|\brisks?\b|be careful|side effect|\bcaution\b/i],
+        w: 1.15,
         zh: '正在评估风险',
         en: 'weighing the risks',
       },
       {
         id: 'answer-organize',
         hit: [/怎么回答|如何解释|怎么说|组织语言|怎么讲|how to (answer|explain|phrase)/i],
+        w: 1.1,
         zh: '正在想怎么讲给你听',
         en: 'planning how to explain',
       },
@@ -237,17 +270,33 @@ window.__ModuleLoader__.load({
     /** 工具 → 动词组（决定「正在读 / 正在执行命令」这些人话动词）。 */
     const TOOL_VERB_GROUPS = {
       bash: 'exec', ops_bash: 'exec', pwsh: 'exec',
-      read: 'read', ops_read_files: 'read',
-      glob: 'find', grep: 'find',
+      read: 'read', ops_read_files: 'read', read_image: 'read',
+      glob: 'find', grep: 'find', search_context: 'find',
       write: 'write', edit: 'edit',
       web_search: 'web', web_fetch: 'web',
-      subagent: 'delegate', subagent_fork: 'delegate',
+      subagent: 'delegate', subagent_fork: 'delegate', send_message: 'delegate',
+      // 真实会话里出现频率不低、以前全掉进 'other' 的那些（事件量占比约 6%）：
+      // 掉进 other 就只能显示「正在执行 compress」这种把工具名直接糊上去的句子。
+      compress: 'recall', decompress: 'recall',
+      mnemon_recall: 'recall', mnemon_remember: 'recall',
+      mnemon_runtime_memory: 'recall',
+      mnemon_document_search: 'recall',
+      mnemon_document_create: 'write', mnemon_document_manage: 'write',
+      todo_write: 'plan',
+      present: 'deliver',
+      job_output: 'job', job_kill: 'job', job_list: 'job',
+      list_agents: 'job',
+      ask_user_question: 'ask',
+      skill: 'skill',
+      load_workspace_dependencies: 'env',
     };
 
     /** 动词组 → 阶段（判断「看完了 N 个文件」这类话术）。 */
     const GROUP_PHASES = {
       read: 'read', find: 'read', exec: 'exec', write: 'edit', edit: 'edit',
       web: 'web', delegate: 'delegate',
+      recall: 'recall', plan: 'plan', deliver: 'deliver',
+      job: 'job', ask: 'ask', skill: 'skill', env: 'env',
     };
 
     const DICT = {
@@ -261,6 +310,15 @@ window.__ModuleLoader__.load({
         failTool: '工具执行失败',
         failExit: '命令执行失败（exit code {code}）',
         failKilled: '命令被终止（exit code null）',
+        /* 回合级失败：这一轮不是被工具坑的，而是模型这轮压根没跑完。
+           宿主在 turn/end 里给了结论（error / max-tokens / interrupted），这是比任何推断都硬的事实。 */
+        failTurn: '这一轮没跑完',
+        failTurnCode: '这一轮没跑完（{code}）',
+        failMaxTokens: '回答到长度上限，这一轮被截断了',
+        failInterrupted: '这一轮被中断了',
+        /* 上游在退避重试：限流、超时这类，和「模型在思考」不是一回事，得说出来。 */
+        retryWait: '上游抖动，第 {n} 次重试等待中',
+        retryWaitBare: '上游抖了一下，等会儿再试',
         detail: '看原始报错',
         elapsedMin: '{m}分{s}秒',
         sumTurn: '本回合',
@@ -269,6 +327,7 @@ window.__ModuleLoader__.load({
         sumTime: '用时 {s}',
         disclaimer: '字幕由规则推断，不代表模型真实意图',
         settings: '字幕设置',
+        close: '收起设置',
         groupLook: '长什么样',
         groupColor: '颜色',
         groupSay: '说什么',
@@ -325,6 +384,20 @@ window.__ModuleLoader__.load({
         v_web_done: '查完资料',
         v_delegate_run: '派了小助手',
         v_delegate_done: '小助手回来了',
+        v_recall_run: '正在翻记忆',
+        v_recall_done: '翻完记忆',
+        v_plan_run: '正在理计划',
+        v_plan_done: '理好计划',
+        v_deliver_run: '正在出交付物',
+        v_deliver_done: '交付物出来了',
+        v_job_run: '正在看后台任务',
+        v_job_done: '后台任务看完了',
+        v_ask_run: '正在等你拍板',
+        v_ask_done: '等你拍板',
+        v_skill_run: '正在翻技能手册',
+        v_skill_done: '翻完技能手册',
+        v_env_run: '正在查运行环境',
+        v_env_done: '查完运行环境',
         v_other_run: '正在执行',
         v_other_done: '完成了',
         /* 阶段话术：工具间隙的思考，按「本回合刚干完什么」说人话。
@@ -334,6 +407,13 @@ window.__ModuleLoader__.load({
         phase_exec: '命令跑完了',
         phase_web: '查完资料',
         phase_delegate: '小助手回来了',
+        phase_recall: '翻了 {n} 次记忆',
+        phase_plan: '理完了计划',
+        phase_deliver: '交付物已经出好了',
+        phase_job: '看过后台任务了',
+        phase_ask: '在等你回话',
+        phase_skill: '查过技能手册了',
+        phase_env: '查过运行环境了',
         phase_other: '这一轮跑了 {n} 步',
         /* 两步之间的空档（工具刚回来、模型还没开口）：报「刚才那件事 + 花了多久」，
            没有可报的事实就不写主文案，交给俏皮词。 */
@@ -346,6 +426,13 @@ window.__ModuleLoader__.load({
         w_edit: '改好了',
         w_web: '查完了',
         w_delegate: '回来了',
+        w_recall: '翻完了',
+        w_plan: '理完了',
+        w_deliver: '出好了',
+        w_job: '看完了',
+        w_ask: '问过了',
+        w_skill: '翻完了',
+        w_env: '查完了',
         w_other: '跑完了',
       },
       en: {
@@ -358,6 +445,12 @@ window.__ModuleLoader__.load({
         failTool: 'tool call failed',
         failExit: 'command failed (exit code {code})',
         failKilled: 'command was killed (exit code null)',
+        failTurn: 'this turn did not finish',
+        failTurnCode: 'this turn did not finish ({code})',
+        failMaxTokens: 'hit the length limit, this turn was cut off',
+        failInterrupted: 'this turn was interrupted',
+        retryWait: 'upstream hiccup, waiting for retry {n}',
+        retryWaitBare: 'upstream hiccup, retrying shortly',
         detail: 'show the raw error',
         elapsedMin: '{m}m {s}s',
         sumTurn: 'Turn',
@@ -366,6 +459,7 @@ window.__ModuleLoader__.load({
         sumTime: 'took {s}',
         disclaimer: 'Inferred from rules, not the model’s intent',
         settings: 'Caption settings',
+        close: 'Close settings',
         groupLook: 'Shape',
         groupColor: 'Colour',
         groupSay: 'What it says',
@@ -421,6 +515,20 @@ window.__ModuleLoader__.load({
         v_web_done: 'finished a web search',
         v_delegate_run: 'delegated a subagent',
         v_delegate_done: 'subagent returned',
+        v_recall_run: 'digging through memory',
+        v_recall_done: 'memory checked',
+        v_plan_run: 'reworking the plan',
+        v_plan_done: 'plan updated',
+        v_deliver_run: 'preparing the deliverable',
+        v_deliver_done: 'deliverable ready',
+        v_job_run: 'checking background jobs',
+        v_job_done: 'background jobs checked',
+        v_ask_run: 'waiting on your call',
+        v_ask_done: 'waiting on your call',
+        v_skill_run: 'looking up a skill',
+        v_skill_done: 'skill looked up',
+        v_env_run: 'probing the environment',
+        v_env_done: 'environment probed',
         v_other_run: 'running',
         v_other_done: 'done with',
         phase_read: 'read {n} files',
@@ -428,6 +536,13 @@ window.__ModuleLoader__.load({
         phase_exec: 'command finished',
         phase_web: 'web search done',
         phase_delegate: 'subagent came back',
+        phase_recall: 'checked memory {n} times',
+        phase_plan: 'plan reworked',
+        phase_deliver: 'deliverable is ready',
+        phase_job: 'checked background jobs',
+        phase_ask: 'waiting for your reply',
+        phase_skill: 'consulted a skill',
+        phase_env: 'checked the environment',
         phase_other: 'ran {n} steps this turn',
         waitFormat: '{what} · {time}',
         waitFormatBare: '{what}',
@@ -438,6 +553,13 @@ window.__ModuleLoader__.load({
         w_edit: 'edit done',
         w_web: 'web search done',
         w_delegate: 'subagent came back',
+        w_recall: 'memory checked',
+        w_plan: 'plan updated',
+        w_deliver: 'deliverable ready',
+        w_job: 'jobs checked',
+        w_ask: 'asked',
+        w_skill: 'skill checked',
+        w_env: 'environment checked',
         w_other: 'step finished',
       },
     };
@@ -678,7 +800,7 @@ window.__ModuleLoader__.load({
      * 这时上层的思考分支会退到俏皮词，绝不写「正在准备下一步」这种放之四海皆准的空话。
      * @returns {null | {text: string, id: string}}
      */
-    function gapText(tools, now) {
+    function gapText(tools) {
       if (!tools || tools.length === 0) return null;
       const last = tools[tools.length - 1];
       const group = TOOL_VERB_GROUPS[last.name] || 'other';
@@ -698,9 +820,9 @@ window.__ModuleLoader__.load({
 
     /**
      * 阶段话术：按「本回合刚干完什么」说人话（最后一条工具的类型决定阶段）。
-     * @returns {null | {text: string, sinceMs: number}}
+     * @returns {null | {text: string}}
      */
-    function phaseText(tools, now) {
+    function phaseText(tools) {
       if (!tools || tools.length === 0) return null;
       const last = tools[tools.length - 1];
       const group = TOOL_VERB_GROUPS[last.name] || 'other';
@@ -718,8 +840,7 @@ window.__ModuleLoader__.load({
       } else {
         text = fmt(translate('phase_' + phase), phase === 'other' ? { n: tools.length } : {});
       }
-      const sinceMs = typeof last.time === 'number' ? Math.max(0, (now || Date.now()) - last.time) : null;
-      return { text, sinceMs };
+      return { text };
     }
 
     /**
@@ -820,19 +941,6 @@ window.__ModuleLoader__.load({
         .trim();
     }
 
-    /**
-     * 摘思考原文的第一句。保留它是为了兼容老测试和其他调用；
-     * 副行现在改用 pickThought（见下），因为模型的第一句几乎总是「Now let me…」这种过场话。
-     */
-    function firstSentence(text) {
-      if (typeof text !== 'string') return '';
-      const clean = plainText(text);
-      if (!clean) return '';
-      const cut = clean.match(/^(.{4,80}?)([。！？!?]|$)/);
-      const sentence = cut ? cut[1] : clean.slice(0, 80);
-      return sentence.length > 60 ? sentence.slice(0, 60) + '…' : sentence;
-    }
-
     /** 口语垫词：模型爱在句首加这些，占了位置却没有信息。 */
     const LEAD_FILLER = /^(but|and|so|then|now|ok|okay|well|actually|basically|hmm|wait|also|plus|still|just|therefore|thus|next|first|second|third|finally|let me|let's|i need to|i should|i will|i'll|i want to|i'm going to|we need to|we should|不过|但是|但|所以|因此|然后|现在|那么|好的|嗯|其实|另外|还有|首先|其次|最后|让我|我先|我来看|接下来|先看|再看|值得注意的是|需要说明的是)[\s,，：:—-]*/i;
 
@@ -926,39 +1034,131 @@ window.__ModuleLoader__.load({
       return null;
     }
 
-    /** 规则表匹配：末尾 RULE_SAMPLE 字里，命中第一条 full-match 的规则。 */
+    /**
+     * 规则表匹配：末尾 RULE_SAMPLE 字里，取「分最高」的那条规则。
+     *
+     * 以前是「命中第一条就返回」——但实测 2000 条真实思考里，有 53.2% 同时命中多条规则，
+     * 谁先谁后完全取决于数组书写顺序，等于一半以上的文案是随手排出来的。
+     * 现在按 rule.w 打分（说了就基本确定的词加分、大词减分），打平才退回数组顺序。
+     */
     function pickRule(text) {
       if (!text) return null;
       const sample = String(text).slice(-RULE_SAMPLE);
+      let best = null;
+      let bestScore = -Infinity;
       for (const rule of RULES) {
-        if (rule.hit.every((pattern) => pattern.test(sample))) return rule;
+        if (!rule.hit.every((pattern) => pattern.test(sample))) continue;
+        const score = typeof rule.w === 'number' ? rule.w : 1;
+        // 严格大于才替换 → 同分时保留数组里靠前的那条，行为可预测。
+        if (score > bestScore) {
+          best = rule;
+          bestScore = score;
+        }
+      }
+      return best;
+    }
+
+    /**
+     * 最近一条「这一轮没跑完」的回合级节点：模型报错（turn-error）或输出到上限（turn-max-tokens）。
+     * 这两个是宿主直接给的结论，不是猜的——字幕以前完全没读，所以回合挂了也只会停在「正在思考」。
+     * @returns {null | {kind:'error'|'maxtokens', code:string, rawLine:string, turn:number, seq:number}}
+     */
+    function latestTurnFailure(nodes, turn) {
+      if (!Array.isArray(nodes) || nodes.length === 0) return null;
+      if (typeof turn !== 'number') return null;
+      for (let i = nodes.length - 1; i >= 0; i -= 1) {
+        const node = nodes[i];
+        if (!node) continue;
+        if (node.kind !== 'turn-error' && node.kind !== 'turn-max-tokens') continue;
+        // 只认当前这一轮：翻历史会话时不会把上一轮的旧报错翻出来。
+        if (typeof node.turn === 'number' && node.turn !== turn) continue;
+        return {
+          // 客户端码里有两个是「用户自己停的」和「登录掉了」，说成「模型报错」会吓人，单列出来。
+          kind: node.kind === 'turn-error'
+            ? (node.code === 'INTERRUPTED' ? 'interrupted' : 'error')
+            : 'maxtokens',
+          code: node.code || '',
+          rawLine: firstLine(node.message),
+          turn,
+          seq: typeof node.seq === 'number' ? node.seq : 0,
+        };
+      }
+      return null;
+    }
+
+    /**
+     * 还挂着没开始的那次模型重试（限流 / 上游抖动）。
+     * 宿主把重试链放在 model-retry 节点里，retryState 有 scheduled / started / cancelled 三态；
+     * 只认 scheduled——started 说明已经在重试了，那就是正常的「正在思考」。
+     * @returns {null | {n:number, max:number, delayMs:number, code:string}}
+     */
+    function pendingRetry(nodes, turn) {
+      if (!Array.isArray(nodes) || nodes.length === 0) return null;
+      if (typeof turn !== 'number') return null;
+      for (let i = nodes.length - 1; i >= 0; i -= 1) {
+        const node = nodes[i];
+        if (!node || node.kind !== 'model-retry') continue;
+        if (typeof node.turn === 'number' && node.turn !== turn) continue;
+        if (node.retryState !== 'scheduled') return null;
+        return {
+          n: typeof node.retry === 'number' ? node.retry : 1,
+          max: typeof node.maxRetries === 'number' ? node.maxRetries : 0,
+          delayMs: typeof node.delayMs === 'number' ? node.delayMs : 0,
+          code: node.failure && node.failure.code ? String(node.failure.code) : '',
+        };
       }
       return null;
     }
 
     /**
      * 纯函数：快照的一段 → 字幕视图模型（不碰 React，方便离线测试）。
-     * 优先级：工具事实 > 规则表（读思考文本）> 阶段话术（本回合干过什么）> 俏皮词。
+     * 优先级：回合失败 > 工具事实 > 重试中 > 规则表（读思考文本）> 阶段话术 > 俏皮词。
      * @returns {null | {state:'running'|'thinking'|'ok'|'error'|'writing', key:string,
-     *   step:number|null, tool:string, target:string, ruleId:string|null,
-     *   phase:string|null, elapsedMs:number|null, kind:string|null, code:string|null, rawLine:string}}
+     *   step:number|null, turn:number|null, tool:string, target:string, ruleId:string|null,
+     *   phase:string|null, sub?:string, kind:string|null, code:string|null, rawLine:string,
+     *   retry?:{n:number,max:number,delayMs:number,code:string}}}
      */
     function deriveCaption(input) {
       const source = input || {};
       const partial = source.partial || null;
       const calls = Array.isArray(source.runningCalls) ? source.runningCalls : EMPTY;
       const nodes = Array.isArray(source.nodes) ? source.nodes : EMPTY;
-      const now = typeof source.now === 'number' ? source.now : Date.now();
       const turn = partial && typeof partial.turn === 'number'
         ? partial.turn
         : (typeof source.turn === 'number' ? source.turn : null);
+
+      // 0) 这一轮已经挂了 / 打到输出上限：宿主给了结论就直接报，别装作还在思考。
+      //    放在最前面，是因为它比任何「正在进行中」的推断都更接近真相。
+      //    组件会把算好的 failure 传进来（它用的是 openTurn，能兜住两步之间的空档）；
+      //    离线调用没传时，这里按 turn 自己算一次，保证这个函数单独拿出来也是对的。
+      const failure = source.failure !== undefined
+        ? source.failure
+        : latestTurnFailure(nodes, turn);
+      // 手头真有工具在跑就先说在跑什么：那是正在发生的事实，
+      // 而「这一轮挂了」是结论，等它空了再报（否则失败后立刻重跑会一直卡在报错上）。
+      if (failure && calls.length === 0) {
+        return {
+          key: 'turnfail:' + (failure.turn || 0) + ':' + (failure.kind || 'error'),
+          state: 'error',
+          turn: typeof failure.turn === 'number' ? failure.turn : turn,
+          step: null,
+          tool: '',
+          target: '',
+          ruleId: null,
+          phase: null,
+          kind: failure.kind || 'error',
+          code: failure.code || null,
+          rawLine: failure.rawLine || '',
+        };
+      }
+
       // 回合还没结束（模型没交出这一轮）：哪怕这一刻 partial 是空的（两步之间的空档），
       // 也不能让字幕收起来——用户要的是「思考没结束就一直挂着」。
       if (!partial && calls.length === 0) {
         if (!source.turnOpen || turn === null) return null;
         // 空档时只报事实：本回合刚跑完的那条工具 + 它花了多久。
         // 没事实可报就把 phase 留空，上层会退到俏皮词——不写「正在准备下一步」这种空话。
-        const done = gapText(turnTools({ nodes, turnEnds: source.turnEnds, turn }), now);
+        const done = gapText(turnTools({ nodes, turnEnds: source.turnEnds, turn }));
         return {
           key: 'wait:' + turn + ':' + (done ? done.id : '-'),
           state: 'thinking',
@@ -968,14 +1168,15 @@ window.__ModuleLoader__.load({
           target: '',
           ruleId: null,
           phase: done ? done.text : null,
-          elapsedMs: null,
           kind: null,
           code: null,
           rawLine: '',
         };
       }
 
-      const step = partial && typeof partial.step === 'number' ? partial.step + 1 : null;
+      // 宿主发出来的 step 本来就是 1 起（用真实会话日志核过：第一个 step 就是 1），
+      // 这里绝对不能再 +1，否则「第 1 步」会被显示成「第 2 步」。
+      const step = partial && typeof partial.step === 'number' ? partial.step : null;
 
       // 1) 有工具在跑。
       if (calls.length > 0) {
@@ -987,12 +1188,11 @@ window.__ModuleLoader__.load({
           key: 'run:' + (call.callId || call.name || 'tool'),
           state: 'running',
           turn,
-          step: typeof call.step === 'number' ? call.step + 1 : step,
+          step: typeof call.step === 'number' ? call.step : step,
           tool: call.name || '',
           target: toolTarget(call),
           ruleId: null,
           phase: null,
-          elapsedMs: typeof call.time === 'number' ? Math.max(0, now - call.time) : null,
           kind: null,
           code: null,
           rawLine: '',
@@ -1015,7 +1215,6 @@ window.__ModuleLoader__.load({
           target: '',
           ruleId: null,
           phase: null,
-          elapsedMs: null,
           kind: null,
           code: null,
           rawLine: '',
@@ -1027,33 +1226,48 @@ window.__ModuleLoader__.load({
       if (tailKind !== 'reasoning' && blocks.length > 0) {
         const result = lastToolResult(nodes);
         if (result) {
-          const failure = failureOf(result);
+          const bad = failureOf(result);
           return {
             key: 'done:' + (result.callId || result.seq || ''),
-            state: failure ? 'error' : 'ok',
+            state: bad ? 'error' : 'ok',
             turn,
             step,
             tool: result.name || '',
             target: toolTarget(result),
             ruleId: null,
             phase: null,
-            elapsedMs: typeof result.callTime === 'number' && typeof result.time === 'number'
-              ? Math.max(0, result.time - result.callTime)
-              : null,
-            kind: failure ? failure.kind : null,
-            code: failure ? failure.code : null,
-            rawLine: failure ? failure.rawLine : '',
+            kind: bad ? bad.kind : null,
+            code: bad ? bad.code : null,
+            rawLine: bad ? bad.rawLine : '',
           };
         }
       }
 
       // 4) 还在思考。
       //    factsOnly（只报事实）：不读思考文本，没有工具在跑就整条收起来。
-      //    否则三层兜底：规则表（读思考文本）→ 阶段话术（本回合干过什么）→ 俏皮词。
+      //    否则多层兜底：重试中 → 规则表（读思考文本）→ 阶段话术（本回合干过什么）→ 俏皮词。
       if (source.factsOnly) return null;
+      // 上游抖动正在退避：这是事实，比读思考文本猜出来的动作准，所以排在规则表前面。
+      const retry = source.retry !== undefined ? source.retry : pendingRetry(nodes, turn);
+      if (retry) {
+        return {
+          key: 'retry:' + (partial.turn || 0) + ':' + (partial.step || 0) + ':' + retry.n,
+          state: 'thinking',
+          turn,
+          step,
+          tool: '',
+          target: '',
+          ruleId: null,
+          phase: null,
+          kind: null,
+          code: retry.code || null,
+          rawLine: '',
+          retry,
+        };
+      }
       const rule = pickRule(lastReasoningText(blocks));
       const tools = turnTools({ nodes, turnEnds: source.turnEnds, turn: partial.turn });
-      const phase = phaseText(tools, now);
+      const phase = phaseText(tools);
       return {
         key: 'think:' + (partial.turn || 0) + ':' + (partial.step || 0) + ':' + (rule ? rule.id : (phase ? 'p' : '-')),
         state: 'thinking',
@@ -1065,22 +1279,10 @@ window.__ModuleLoader__.load({
         // 副行：从这段思考里挑一句最有信息量的（不是第一句——第一句几乎都是过场话）。
         sub: pickThought(lastReasoningText(blocks)),
         phase: !rule && phase ? phase.text : null,
-        elapsedMs: !rule && phase ? phase.sinceMs : null,
         kind: null,
         code: null,
         rawLine: '',
       };
-    }
-
-    /** 跑着的时候每秒刷一次，让耗时数字会走。 */
-    function useNow(active) {
-      const [now, setNow] = React.useState(() => Date.now());
-      React.useEffect(() => {
-        if (!active) return undefined;
-        const timer = setInterval(() => setNow(Date.now()), NOW_MS);
-        return () => clearInterval(timer);
-      }, [active]);
-      return now;
     }
 
     /** 每 period 毫秒 +1；active 为假时不动（省电，也不打扰）。 */
@@ -1135,9 +1337,6 @@ window.__ModuleLoader__.load({
       if (openTurn !== null && turnEnds && typeof turnEnds.has === 'function' && turnEnds.has(openTurn)) {
         openTurn = null;
       }
-      const active = Boolean(partial)
-        || (Array.isArray(runningCalls) && runningCalls.length > 0)
-        || openTurn !== null;
 
       const [settings, setSettings] = React.useState(readSettings);
       const [settingsOpen, setSettingsOpen] = React.useState(false);
@@ -1149,19 +1348,51 @@ window.__ModuleLoader__.load({
         });
       };
 
-      const now = useNow(active);
+      // 键盘可达性：面板打开时按 Esc 收起，并把焦点还给齿轮。
+      // 以前只能再点一次齿轮才能关，纯键盘用户打开面板后没有退路。
+      const gearRef = React.useRef(null);
+      React.useEffect(() => {
+        if (!settingsOpen) return undefined;
+        if (typeof document === 'undefined' || typeof document.addEventListener !== 'function') {
+          return undefined;
+        }
+        const onKey = (event) => {
+          if (!event || (event.key !== 'Escape' && event.key !== 'Esc')) return;
+          setSettingsOpen(false);
+          const gear = gearRef.current;
+          if (gear && typeof gear.focus === 'function') gear.focus();
+        };
+        document.addEventListener('keydown', onKey);
+        return () => {
+          if (typeof document.removeEventListener === 'function') {
+            document.removeEventListener('keydown', onKey);
+          }
+        };
+      }, [settingsOpen]);
+
+      // 回合级事实：这一轮是不是已经挂了 / 是不是在等上游重试。
+      // 以前字幕只认工具结果，模型限流、回合被打断、输出超长时它会一直停在「正在思考」。
+      const failure = React.useMemo(
+        () => latestTurnFailure(nodes, openTurn),
+        [nodes, openTurn],
+      );
+      const retry = React.useMemo(
+        () => (failure ? null : pendingRetry(nodes, openTurn)),
+        [nodes, openTurn, failure],
+      );
       const view = React.useMemo(
         () => deriveCaption({
           partial,
           runningCalls,
           nodes,
           turnEnds,
-          now,
+          failure,
+          retry,
           factsOnly: settings.factsOnly,
           turn: openTurn,
           turnOpen: openTurn !== null,
         }),
-        [partial, runningCalls, nodes, now, settings.factsOnly, openTurn, t],
+        [partial, runningCalls, nodes, failure, retry, settings.factsOnly, openTurn, t],
       );
 
       // 一闪而过的状态也要留一会儿再收：模型想得快的时候，字幕常常零点几秒就消失，人来不及读。
@@ -1229,6 +1460,13 @@ window.__ModuleLoader__.load({
       const candidate = React.useMemo(() => {
         if (!shown) return t('idleStrip');
         if (shown.state === 'thinking') {
+          // 上游退避重试：这条必须排在规则文案前面——它是事实，规则是从思考文本里猜的。
+          // （原来这个分支放在 thinking 之后，永远走不到。）
+          if (shown.retry) {
+            return shown.retry.n > 0
+              ? fmt(t('retryWait'), { n: shown.retry.n })
+              : t('retryWaitBare');
+          }
           // 三层兜底：规则文案（读思考文本）→ 阶段话术（本回合干过什么）→ 俏皮词。
           if (shown.ruleId) {
             // 同一动作三种说法轮着来：按（回合, 步）算，稳定不闪。
@@ -1248,6 +1486,12 @@ window.__ModuleLoader__.load({
         if (shown.state === 'error') {
           if (shown.kind === 'exit') return fmt(t('failExit'), { code: shown.code });
           if (shown.kind === 'killed') return t('failKilled');
+          // 回合级失败：模型这轮没跑完，不是某个工具挂了，措辞要区分开。
+          if (shown.kind === 'maxtokens') return t('failMaxTokens');
+          if (shown.kind === 'interrupted') return t('failInterrupted');
+          if (shown.kind === 'error') {
+            return shown.code ? fmt(t('failTurnCode'), { code: shown.code }) : t('failTurn');
+          }
           return t('failTool') + (shown.target ? ' ' + shown.target : '');
         }
         return actionText(shown.tool, shown.target, 'ok');
@@ -1274,12 +1518,30 @@ window.__ModuleLoader__.load({
         return () => clearTimeout(timer);
       }, [viewKey, viewState]);
       const showFull = Boolean(shown) && !gone;
+      // 收起（只剩齿轮）时不需要任何稳定窗口：这时候没人看得见文字，
+      // 让它直接跟上候选。否则重新出现的头 holdMs 里会闪一下上一次的旧句子。
+      React.useEffect(() => {
+        if (!showFull && label !== candidate) setLabel(candidate);
+      }, [showFull, candidate, label]);
 
       // 收起时不要立刻把文字抽走：那样会看到「字先消失、空壳再缩」的两段动作。
       // 记住最后一次画出来的内容，让它在收起的 180ms 里跟着淡出，看起来才是一个整体。
       const paintedRef = React.useRef(null);
       if (shown) paintedRef.current = shown;
       const painted = showFull ? shown : paintedRef.current;
+
+      // 步骤号整轮常驻：两步之间 partial 会短暂为空，那一刻 view 的 step 是 null，
+      // 以前就照着 null 把「第 N 步」整块摘掉，下一步再挂回来——看着就是标题在闪。
+      // 现在记住最后一个非空步号，空档时沿用；只有跨到新的一轮才清空。
+      const stepRef = React.useRef({ turn: null, step: null });
+      const shownTurn = shown && typeof shown.turn === 'number' ? shown.turn : null;
+      if (shownTurn !== null && stepRef.current.turn !== shownTurn) {
+        stepRef.current = { turn: shownTurn, step: null };
+      }
+      if (shown && typeof shown.step === 'number') stepRef.current.step = shown.step;
+      const pinnedStep = shown && typeof shown.step === 'number' ? shown.step : stepRef.current.step;
+      // 整轮最前面这几步状态翻得最勤：不播任何淡入，纯硬切换，把「闪」从根上掐掉。
+      const settling = typeof pinnedStep === 'number' && pinnedStep <= SETTLE_STEPS;
 
       const status = !shown
         ? ''
@@ -1305,16 +1567,19 @@ window.__ModuleLoader__.load({
       }, t(option.label))));
 
       // 颜色选择：色块按钮，比下拉直观；「跟随主题」用一个小圆环表示。
+      // 色块本身没有可见文字，所以颜色名必须写进 aria-label —— 以前六个色块的
+      // aria-label 全是同一个「字幕条颜色」，读屏根本分不出点的是哪个色。
       const swatches = (name, value, table, onChange) => h('span', {
         className: 'pgc-swatches',
         role: 'group',
-        'aria-label': t('colorAccent'),
+        'aria-label': t(name),
       }, Object.keys(table).map((key) => h('button', {
         type: 'button',
         key,
         className: 'pgc-swatch' + (table[key].value ? '' : ' pgc-swatch--auto'),
         'data-on': key === value ? 'true' : 'false',
         'aria-pressed': key === value ? 'true' : 'false',
+        'aria-label': t(table[key].label),
         title: t(table[key].label),
         style: table[key].value ? { '--pgc-sw': table[key].value } : undefined,
         onClick: () => onChange(key),
@@ -1337,6 +1602,7 @@ window.__ModuleLoader__.load({
         h('button', {
           type: 'button',
           className: 'pgc-gear',
+          ref: gearRef,
           'aria-expanded': settingsOpen ? 'true' : 'false',
           'aria-label': t('settings'),
           title: t('settings'),
@@ -1353,7 +1619,8 @@ window.__ModuleLoader__.load({
             h('button', {
               type: 'button',
               className: 'pgc-sheet-close',
-              'aria-label': t('settings'),
+              'aria-label': t('close'),
+              title: t('close'),
               onClick: () => setSettingsOpen(false),
             }, '✕')),
           h('div', { className: 'pgc-sheet-body' },
@@ -1405,6 +1672,7 @@ window.__ModuleLoader__.load({
         'pgc-strip--' + (shown ? shown.state : 'idle'),
         holding ? 'pgc-strip--held' : null,
         showFull ? null : 'pgc-strip--handle',
+        settling ? 'pgc-strip--settle' : null,
         'pgc-size-' + settings.size,
         'pgc-anim-' + settings.anim,
         'pgc-flavor-' + settings.flavorStyle,
@@ -1423,8 +1691,11 @@ window.__ModuleLoader__.load({
         h('span', { className: 'pgc-band', 'aria-hidden': showFull ? undefined : 'true' },
           painted && showFull
             ? h('span', { className: 'pgc-live', role: 'status', 'aria-live': 'polite' },
-              painted.step !== null
-                ? h('span', { className: 'pgc-step' }, fmt(t('step'), { n: painted.step }))
+              // 步号用 pinnedStep，不用 painted.step：两步之间 partial 为空时，
+              // painted.step 会是 null，把「第 N 步」整块摘掉再挂回来，就是标题在闪。
+              // pinnedStep 会沿用最后一个非空步号，跨轮才清空，所以它整轮都在、不乱动。
+              pinnedStep !== null
+                ? h('span', { className: 'pgc-step' }, fmt(t('step'), { n: pinnedStep }))
                 : null,
               // 三个小点排队跳：借的是 dsh-claude-style 的 bounce 轨道
               // （三颗 4px 圆点，同一个 keyframes，靠 nth-child 错开负的 animation-delay）。
@@ -1434,7 +1705,7 @@ window.__ModuleLoader__.load({
                 h('span', { className: 'pgc-dot' }),
                 h('span', { className: 'pgc-dot' })),
               // 加 key 让「换文案」重挂载一次，淡入才会重播；label 已经被 holdMs
-              // 稳定过（最快 350ms / 快思考 800ms 才换一次），比 160ms 的动画长，不会连成闪烁。
+              // 稳定过（最快 520ms / 快思考 800ms 才换一次），比 160ms 的动画长，不会连成闪烁。
               h('span', { className: 'pgc-text' },
                 h('span', { className: 'pgc-label', key: label }, label),
                 // 「思考原话」开关打开后，才多给一行模型自己的思考首句当副行。
@@ -1447,19 +1718,15 @@ window.__ModuleLoader__.load({
                 ? h('span', { className: 'pgc-chip' }, status)
                 : null,
               // 这里原来是耗时（`pgc-time`），已移除：那个数字和思维链区域的时间重复，
-              // 而且每秒跳一次还容易抢注意力。位置现在放 Claude 式的三点循环。
+              // 而且每秒跳一次还容易抢注意力。位置现在放一个匀速转的细弧线。
               // 宽高写死在 .pgc-slot 上（3.6em × 1em，与原来的耗时格一样宽），
-              // 所以三点怎么跳都不会把左右两边挤动，俏皮词的位置也跟以前一致。
+              // 所以弧线怎么转都不会把左右两边挤动，俏皮词的位置也跟以前一致。
               // 不能删：删掉后「状态胶囊 → 俏皮词」的间距会变，看着像排版塌了。
               h('span', {
                 className: 'pgc-slot',
                 'data-pgc-slot': 'loop',
                 'aria-hidden': true,
-              },
-              h('span', { className: 'pgc-loop' },
-                h('span', { className: 'pgc-loop-dot' }),
-                h('span', { className: 'pgc-loop-dot' }),
-                h('span', { className: 'pgc-loop-dot' }))),
+              }, h('span', { className: 'pgc-arc' })),
               // 俏皮词放最右端：它只是气氛，不属于左边那句状态描述。
               suffix ? h('span', { className: 'pgc-flavor', key: suffix }, suffix) : null)
             : null,
@@ -1622,28 +1889,40 @@ window.__ModuleLoader__.load({
    只在「安静 / 扫光」两档挂动画，「全静止」档连这个也关掉。 */
 .pgc-anim-calm .pgc-label,
 .pgc-anim-sweep .pgc-label { animation: pgc-swap .16s cubic-bezier(.23, 1, .32, 1) both; }
-/* 扫光：只扫「第一行主文案」，不扫整条。
-   - 光带是 .pgc-label 自己身上的 ::after，父级本来就 overflow: hidden，
-     所以它永远出不了这一行，也压不到下面那行副行（.pgc-sub）；
-   - 宽度只占这一行的 40%，看到的是一道窄光划过，而不是整条底色一起亮；
-   - 方向严格从左到右：translateX 从 -100%（整道藏在左边界外）走到 350%（完全划出右边界）；
-   - 只动 transform，不改宽高、不改 background-size，不起重排。 */
-.pgc-anim-sweep .pgc-label::after {
+/* 整轮最前面几步（≤ SETTLE_STEPS）一律硬切换：状态翻得最勤的就是这几步，
+   淡入/上浮一秒能量播两三次，叠起来就是「一直在闪」。这一步只关「换文案」的动画，
+   不动排版，也不关 .pgc-live 的入场动画——那个一次出现只播一次，不是闪烁来源。 */
+.pgc-strip--settle .pgc-flavor,
+.pgc-strip--settle .pgc-label { animation: none; }
+/* 扫光：整条字幕从左到右掠过一遍，光带铺满这个框的宽度。
+   （原来是 40% 宽的光带只在第一行主文案里走，看起来是「中间闪一下」。）
+   - 挂在 .pgc-band 上（它是整条内容的裁剪框，overflow: hidden，高度会随收放过渡），
+     这样光带横扫的是「整条」，从最左边界外出发、走到最右边界外；
+   - width: 100%：光带本身就有整框那么宽，配合 translateX(-100%) → translateX(100%)
+     正好是「左边界外 → 右边界外」，全程没有局部聚集；
+   - 渐变是「透明 → 亮 → 透明」横跨整条，所以扫过时看到的是均匀一道光，不是中间一个点；
+   - 只动 transform（合成层），不改宽高、不起重排。 */
+.pgc-anim-sweep .pgc-band { position: relative; overflow: hidden; }
+.pgc-anim-sweep .pgc-band::after {
   content: '';
   position: absolute;
   top: 0; bottom: 0; left: 0;
-  width: 40%;
+  width: 100%;
   pointer-events: none;
   background-image: linear-gradient(
     90deg,
     transparent 0%,
-    color-mix(in srgb, var(--pgc-accent) 26%, transparent) 50%,
+    color-mix(in srgb, var(--pgc-accent) 22%, transparent) 45%,
+    color-mix(in srgb, var(--pgc-accent) 30%, transparent) 50%,
+    color-mix(in srgb, var(--pgc-accent) 22%, transparent) 55%,
     transparent 100%
   );
   transform: translateX(-100%);
-  animation: pgc-sweep 2.2s cubic-bezier(.45, .05, .55, .95) infinite;
+  animation: pgc-sweep 2.4s cubic-bezier(.45, .05, .55, .95) infinite;
 }
-/* 第二行（思考原话）不扫：这里显式关掉，免得以后有人给 .pgc-sub 加同名规则时被顺带扫到。 */
+/* 主文案自己不再挂扫光（以前是 .pgc-label::after 那层窄光带）。 */
+.pgc-anim-sweep .pgc-label::after { content: none; animation: none; }
+/* 第二行（思考原话）也不再单独扫：整条已经一起扫了，再叠一层就是双光。 */
 .pgc-anim-sweep .pgc-sub::after { content: none; animation: none; }
 /* 俏皮词：不用斜体（中文被强行倾斜很难看），固定占最右一格。
    宽度写死 6.6em：词最短 3 字最长 5 字，写死之后换词时右边这块纹丝不动，
@@ -1683,33 +1962,32 @@ window.__ModuleLoader__.load({
 .pgc-strip--ok .pgc-chip { color: var(--pgc-ok); border-color: color-mix(in srgb, var(--pgc-ok) 48%, transparent); }
 .pgc-strip--error .pgc-chip { color: var(--pgc-bad); border-color: color-mix(in srgb, var(--pgc-bad) 52%, transparent); }
 /* 【原耗时位】原来这里放的是耗时（.pgc-time，已移除：和思维链区域的时间重复）。
-   现在这块地放 Claude 那套「三点循环」：
-   - 盒子宽高写死（3.6em × 1em，宽度与原来的耗时格一致），所以三点怎么跳都不推挤左右；
-   - 三点是三个绝对定位的小圆点，靠 nth-child 负延迟错相位，排队跳；
-   - 只动 transform / opacity（合成层），不改宽高、不重排。 */
+   现在这块地放一根匀速转的细弧线（原来这里是三颗跳动的小点，太吵）：
+   - 盒子宽高写死（3.6em × 1em，宽度与原来的耗时格一致），所以怎么转都不推挤左右；
+   - 弧线本身是 10px 的圆，只画一段弧（其余透明），靠 border 造出来；
+   - 只动 transform（合成层），不改宽高、不重排。 */
 .pgc-slot {
   flex: 0 0 auto;
   width: 3.6em; height: 1em;
   display: inline-flex; align-items: center; justify-content: center;
 }
-.pgc-loop { display: inline-flex; align-items: flex-end; gap: 3px; height: 7px; }
-.pgc-loop-dot {
-  width: 3px; height: 3px; border-radius: 50%;
-  background: var(--pgc-accent); opacity: .5;
-  transform-origin: 50% 100%;
-  animation: pgc-loop-bounce 1.15s cubic-bezier(.36, 0, .64, 1) infinite;
+.pgc-arc {
+  width: 10px; height: 10px; box-sizing: border-box;
+  border-radius: 50%;
+  border: 1.5px solid color-mix(in srgb, var(--pgc-accent) 22%, transparent);
+  /* 只留顶边是实色，转起来就是一段缺口在跑。 */
+  border-top-color: var(--pgc-accent);
+  animation: pgc-spin .9s linear infinite;
 }
-.pgc-loop-dot:nth-child(2) { animation-delay: -.38s; }
-.pgc-loop-dot:nth-child(3) { animation-delay: -.77s; }
-/* 扫光档：跳得更明显一点（抬得高、亮度起伏大），跟同档的文字流光配套。 */
-.pgc-anim-sweep .pgc-loop-dot { animation-name: pgc-loop-bounce-big; }
-/* 全静止档：完全不动，三颗点常亮。 */
-.pgc-anim-off .pgc-loop-dot { animation: none; opacity: .55; }
-/* 已经成功 / 已经失败：没必要继续跳，停成静止的三颗点，颜色跟随状态色。 */
-.pgc-strip--ok .pgc-loop-dot,
-.pgc-strip--error .pgc-loop-dot { animation: none; opacity: .7; }
-.pgc-strip--ok .pgc-loop-dot { background: var(--pgc-ok); }
-.pgc-strip--error .pgc-loop-dot { background: var(--pgc-bad); }
+/* 安静档：转慢一点，别抢注意力。 */
+.pgc-anim-calm .pgc-arc { animation-duration: 1.5s; }
+/* 全静止档：不转，弧线常亮。 */
+.pgc-anim-off .pgc-arc { animation: none; opacity: .6; }
+/* 已经成功 / 已经失败：没必要继续转，停住，颜色跟随状态色。 */
+.pgc-strip--ok .pgc-arc,
+.pgc-strip--error .pgc-arc { animation: none; opacity: .75; }
+.pgc-strip--ok .pgc-arc { border-color: var(--pgc-ok); border-top-color: var(--pgc-ok); }
+.pgc-strip--error .pgc-arc { border-color: var(--pgc-bad); border-top-color: var(--pgc-bad); }
 .pgc-strip--handle { padding: 0 10px 2px; background: transparent; border-color: transparent; justify-content: flex-end; }
 /* 状态已经结束、只是还没挂满最短停留时间：保持不透明，靠收起动画收，不要再压暗一次（压暗会被看成闪）。 */
 .pgc-strip--held { opacity: 1; }
@@ -1834,25 +2112,19 @@ window.__ModuleLoader__.load({
   8% { transform: translateY(0) scale(1.28, .72); }
   30% { transform: translateY(-3px) scale(.92, 1.12); }
 }
-/* 扫光关键帧：光带贴着第一行的左边界外面出发，一路划到右边界外面。
-   -100% 时这道光完全在裁剪框左侧看不见；350% 时它已整条越过右边界（50% 是一半宽度在框内）。 */
+/* 扫光关键帧：整条光带从左边界外一路走到右边界外，全程匀速横穿。
+   宽度就是整框（100%），所以 -100% 时完全在左侧看不见，100% 时完全越过右侧，
+   中间任何时刻都是一道「和框一样宽」的光在平移——没有局部聚集的闪烁。 */
 @keyframes pgc-sweep {
   0% { transform: translateX(-100%); }
-  100% { transform: translateX(350%); }
+  100% { transform: translateX(100%); }
 }
-/* 预留位上的三点循环（Claude 那种）：三颗点共用一条 keyframes，
-   靠 nth-child 的负 animation-delay 错开约三分之一周期，看着像排队跳。
-   只动 transform 和 opacity —— 都是合成层属性，不改宽高、不触发重排；
-   周期 1.15s、每颗点抬 3px，幅度刻意压得小，避免在输入框上方抢注意力。 */
-@keyframes pgc-loop-bounce {
-  0%, 60%, 100% { transform: translateY(0) scale(1, 1); opacity: .45; }
-  30% { transform: translateY(-3px) scale(.92, 1.08); opacity: 1; }
-}
-/* 扫光档：同一套节奏，抬得高一点、亮度起伏大一点，跟文字流光配套。 */
-@keyframes pgc-loop-bounce-big {
-  0%, 60%, 100% { transform: translateY(0) scale(1, 1); opacity: .4; }
-  8% { transform: translateY(0) scale(1.2, .8); opacity: .8; }
-  30% { transform: translateY(-4px) scale(.9, 1.12); opacity: 1; }
+/* 预留位上的细弧线：一个只画了一段弧的小圆环，匀速绕自己的圆心转。
+   只动 transform（合成层），不改宽高、不触发重排；
+   周期 .9s，安静档 1.5s，幅度小、存在感低，不在输入框上方抢注意力。 */
+@keyframes pgc-spin {
+  from { transform: rotate(0deg); }
+  to { transform: rotate(360deg); }
 }
 `;
 
@@ -1893,8 +2165,9 @@ window.__ModuleLoader__.load({
         deriveCaption,
         failureOf,
         pickRule,
+        latestTurnFailure,
+        pendingRetry,
         RULE_VARIANTS,
-        firstSentence,
         pickThought,
         stripLead,
         splitSentences,
@@ -1919,6 +2192,7 @@ window.__ModuleLoader__.load({
         DICT,
         LABEL_HOLD_MS,
         LABEL_HOLD_FAST_MS,
+        SETTLE_STEPS,
         FAST_CPS,
         OK_LINGER_MS,
         MIN_SHOW_MS,
