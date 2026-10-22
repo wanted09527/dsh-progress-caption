@@ -939,9 +939,6 @@ test('同一动作换着说法：每条规则至少 3 种，且不同步数会�
 });
 
 test('副行：打开「思考原话」才摘一句，关着时不占地方', () => {
-  assert.equal(__test.firstSentence('**先看 package.json** 的入口。后面再说'), '先看 package.json 的入口');
-  assert.equal(__test.firstSentence(''), '');
-
   const data = {
     partial: { turn: 2, step: 0, blocks: [{ kind: 'reasoning', text: '我先读取配置文件，看看入口在哪。然后决定改哪里。' }] },
     runningCalls: [],
@@ -951,20 +948,46 @@ test('副行：打开「思考原话」才摘一句，关着时不占地方', ()
   try {
     globalThis.localStorage = { getItem: () => JSON.stringify({ subLine: true }), setItem: () => {} };
     const wide = render(data);
-    assert.match(text(wide), /我先读取配置文件/);
+    assert.match(text(wide), /读取配置文件/);
+    // 「我先」这类过场话必须被剥掉，副行从有内容的半句开始。
+    assert.doesNotMatch(text(wide), /我先读取配置文件/);
 
     globalThis.localStorage = { getItem: () => JSON.stringify({ subLine: false }), setItem: () => {} };
-    assert.doesNotMatch(text(render(data)), /我先读取配置文件/);
+    assert.doesNotMatch(text(render(data)), /读取配置文件/);
 
     // 老存档（只有 lines 字段）也要按原样复活：lines>=2 视为打开。
     globalThis.localStorage = { getItem: () => JSON.stringify({ lines: 2 }), setItem: () => {} };
-    assert.match(text(render(data)), /我先读取配置文件/);
+    assert.match(text(render(data)), /读取配置文件/);
     globalThis.localStorage = { getItem: () => JSON.stringify({ lines: 1 }), setItem: () => {} };
-    assert.doesNotMatch(text(render(data)), /我先读取配置文件/);
+    assert.doesNotMatch(text(render(data)), /读取配置文件/);
   } finally {
     if (previous === undefined) delete globalThis.localStorage;
     else globalThis.localStorage = previous;
   }
+});
+
+test('副行挑句：不再摘第一句过场话，而是挑有判断/有具体东西的那句', () => {
+  // 第一句是纯过场话 → 必须跳过它
+  const passing = 'Now let me look at the files. The real problem is that the strip has no stable width.';
+  const picked = __test.pickThought(passing);
+  assert.doesNotMatch(picked, /^Now let me/, '过场话不能被当成副行');
+  assert.match(picked, /real problem|stable width/, '应该挑到有信息量的那句：' + picked);
+
+  // 中文：「我先…」要剥掉
+  assert.equal(__test.stripLead('我先读取配置文件'), '读取配置文件');
+  assert.equal(__test.stripLead('But also, the reason is simple'), 'The reason is simple');
+
+  // 清单开头（"…：1."）不单独摘出来
+  assert.doesNotMatch(__test.pickThought('改这里：1. 先改 A 2. 再改 B'), /[:：]\s*$|：1\.$/);
+
+  // 实在挑不出来 → 返回空串，宁可这行不显示
+  assert.equal(__test.pickThought('好的'), '');
+  assert.equal(__test.pickThought(''), '');
+
+  // 只截断、不改写：挑出来的句子必须是原文里真实存在的一段
+  const text0 = 'The key risk is that the timer keeps firing while the tab is hidden, so the strip updates forever.';
+  const one = __test.pickThought(text0);
+  assert.ok(text0.includes(one.replace(/…$/, '')), '不许改写原文：' + one);
 });
 
 test('耗时不到 1 秒不显示，免得挂个「0.0s」像坏了', () => {

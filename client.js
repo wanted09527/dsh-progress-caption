@@ -766,21 +766,101 @@ window.__ModuleLoader__.load({
       return '';
     }
 
-    /**
-     * 摘思考原文的第一句当副行：只截断、不改写，所以永远不会「猜错」。
-     * 去掉 markdown 记号（**、`、#）和多余空白，中文句号/问号/换行都算断句。
-     */
-    function firstSentence(text) {
-      if (typeof text !== 'string') return '';
-      const clean = text
+    /** 去掉 markdown 记号与多余空白，副行只显示纯文字。 */
+    function plainText(text) {
+      return String(text || '')
         .replace(/```[\s\S]*?```/g, ' ')
         .replace(/[`*_>#]/g, '')
         .replace(/\s+/g, ' ')
         .trim();
+    }
+
+    /**
+     * 摘思考原文的第一句。保留它是为了兼容老测试和其他调用；
+     * 副行现在改用 pickThought（见下），因为模型的第一句几乎总是「Now let me…」这种过场话。
+     */
+    function firstSentence(text) {
+      if (typeof text !== 'string') return '';
+      const clean = plainText(text);
       if (!clean) return '';
       const cut = clean.match(/^(.{4,80}?)([。！？!?]|$)/);
       const sentence = cut ? cut[1] : clean.slice(0, 80);
       return sentence.length > 60 ? sentence.slice(0, 60) + '…' : sentence;
+    }
+
+    /** 口语垫词：模型爱在句首加这些，占了位置却没有信息。 */
+    const LEAD_FILLER = /^(but|and|so|then|now|ok|okay|well|actually|basically|hmm|wait|also|plus|still|just|therefore|thus|next|first|second|third|finally|let me|let's|i need to|i should|i will|i'll|i want to|i'm going to|we need to|we should|不过|但是|但|所以|因此|然后|现在|那么|好的|嗯|其实|另外|还有|首先|其次|最后|让我|我先|我来看|接下来|先看|再看|值得注意的是|需要说明的是)[\s,，：:—-]*/i;
+
+    /** 有判断、有取舍、有卡点的句子，信息量最高。 */
+    const THOUGHT_SIGNAL = /(因为|所以|但是|不过|其实|问题|原因|风险|应该|不该|选择|取舍|取决于|卡在|失败|报错|错误|根因|关键|注意|否则|反而|这意味着|说明|限制|代价|矛盾|冲突|怀疑|猜测|不确定|原因是|问题是|better|because|however|instead|reason|risk|problem|issue|tradeoff|depends|fail|error|root cause|means |suggest)/i;
+
+    /** 带具体东西（路径、文件名、数字、命令）的句子，也比空话强。 */
+    const THOUGHT_SPECIFIC = /([\w.-]+\/[\w./-]+|\b[\w-]+\.(js|mjs|ts|tsx|json|md|yml|yaml|css|html)\b|"[^"]{2,40}"|\b\d+(\.\d+)?\s*(ms|s|px|em|rem|KB|MB|%)\b|\bexit code\b|\b[a-zA-Z_]{3,}\(\))/i;
+
+    /** 反复剥掉句首口语垫词，剥到没得剥为止（连续两个垫词很常见）。 */
+    function stripLead(sentence) {
+      let out = String(sentence || '').trim();
+      for (let guard = 0; guard < 4; guard += 1) {
+        const next = out.replace(LEAD_FILLER, '').trim();
+        if (next === out || next.length < 4) break;
+        out = next;
+      }
+      // 剥掉「Let me」之后可能剩个小写开头（"read client.js…"），补回大写才像句子。
+      if (/^[a-z]/.test(out)) out = out.charAt(0).toUpperCase() + out.slice(1);
+      return out;
+    }
+
+    /** 按中英标点切句，只留长度像句子的片段。 */
+    function splitSentences(text) {
+      return plainText(text)
+        .split(/(?<=[。！？!?;；])\s*|(?<=[.])\s+/)
+        .map((item) => item.trim())
+        .filter((item) => item.length >= 8 && item.length <= 200);
+    }
+
+    /** 截到 60 字以内，尽量在标点处断，别切断一个词。 */
+    function clipSentence(sentence) {
+      if (sentence.length <= 60) return sentence;
+      const cut = sentence.slice(0, 60);
+      const lastBreak = Math.max(
+        cut.lastIndexOf('，'),
+        cut.lastIndexOf(','),
+        cut.lastIndexOf('；'),
+        cut.lastIndexOf('：'),
+        cut.lastIndexOf(':'),
+      );
+      return (lastBreak >= 24 ? cut.slice(0, lastBreak) : cut) + '…';
+    }
+
+    /**
+     * 从一整段思考里挑一句最值得给用户看的，当副行。
+     * 为什么不用第一句：模型的第 1 句几乎都是「Now let me…/让我先看看」这种过场话，
+     * 真正的判断、权衡、卡点通常在后面。这里只截断和排序，不改写内容——所以不会「猜错」。
+     * 一条都挑不出来时返回空串，宁可这行不显示，也不显示一句废话。
+     */
+    function pickThought(text) {
+      const list = splitSentences(text);
+      if (list.length === 0) return '';
+      let best = null;
+      let fallback = '';
+      list.forEach((raw, index) => {
+        const sentence = stripLead(raw);
+        if (sentence.length < 8) return;
+        // 「…：1.」这种是清单开头，单独摘出来读着像断掉，跳过。
+        const looksLikeList = /[:：]\s*\d?\.?\s*$/.test(sentence) || /^\d+[.、)]\s*$/.test(sentence);
+        if (!looksLikeList && sentence.length >= 10) fallback = sentence;
+        if (looksLikeList) return;
+        let value = 0;
+        if (THOUGHT_SIGNAL.test(sentence)) value += 5;
+        if (THOUGHT_SPECIFIC.test(sentence)) value += 3;
+        if (sentence.length >= 12 && sentence.length <= 60) value += 2;
+        if (sentence.length < 10) value -= 3;
+        // 越靠后越接近「当下正在纠结的事」，给一点加成。
+        if (list.length > 1) value += (index / (list.length - 1)) * 1.5;
+        if (!best || value > best.value) best = { sentence, value };
+      });
+      if (best && best.value >= 3) return clipSentence(best.sentence);
+      return fallback ? clipSentence(fallback) : '';
     }
 
     /**
@@ -934,8 +1014,8 @@ window.__ModuleLoader__.load({
         tool: '',
         target: '',
         ruleId: rule ? rule.id : null,
-        // 副行：直接摘思考原文的第一句（不加工、不猜），让字幕有「解说感」。
-        sub: firstSentence(lastReasoningText(blocks)),
+        // 副行：从这段思考里挑一句最有信息量的（不是第一句——第一句几乎都是过场话）。
+        sub: pickThought(lastReasoningText(blocks)),
         phase: !rule && phase ? phase.text : null,
         elapsedMs: !rule && phase ? phase.sinceMs : null,
         kind: null,
@@ -1665,6 +1745,9 @@ window.__ModuleLoader__.load({
         pickRule,
         RULE_VARIANTS,
         firstSentence,
+        pickThought,
+        stripLead,
+        splitSentences,
         wordAt,
         durationText,
         toolTarget,
