@@ -17,11 +17,11 @@
   ],
   "repository": {
     "type": "git",
-    "url": "git+https://github.com/YOUR-GITHUB-USERNAME/dsh-progress-caption.git"
+    "url": "git+https://github.com/wanted09527/dsh-progress-caption.git"
   },
-  "homepage": "https://github.com/YOUR-GITHUB-USERNAME/dsh-progress-caption#readme",
+  "homepage": "https://github.com/wanted09527/dsh-progress-caption#readme",
   "bugs": {
-    "url": "https://github.com/YOUR-GITHUB-USERNAME/dsh-progress-caption/issues"
+    "url": "https://github.com/wanted09527/dsh-progress-caption/issues"
   },
   "type": "module",
   "scripts": {

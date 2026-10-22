@@ -17,7 +17,7 @@
 先从 GitHub 克隆到你喜欢的位置（示例放在 `E:\deepseek\插件\plugins\`）：
 
 ```bash
-git clone https://github.com/YOUR-GITHUB-USERNAME/dsh-progress-caption.git
+git clone https://github.com/wanted09527/dsh-progress-caption.git
 ```
 
 然后在插件管理器里用它所在的目录安装：
