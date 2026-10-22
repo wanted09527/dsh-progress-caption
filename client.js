@@ -1550,15 +1550,19 @@ window.__ModuleLoader__.load({
      收放用 max-height（会触发布局，这是唯一一处：不收高度就只能留个空壳），
      时长压到 180ms 并把缓动换成强 ease-out，看上去是一口气收掉而不是慢慢挤。 */
   max-height: 7em; opacity: 1;
-  /* 平时不裁剪。原因：裁剪框正好贴着内容高度时，入场/换词那 2px 的 translateY
-     会把右下角（俏皮词胶囊的底边）切掉一条——一行时内容最矮，所以只有「一行」
-     才看得出来，两行反而没事。只有「收成齿轮」那一刻才需要裁剪把内容收干净，
-     所以把 overflow:hidden 挪到 --handle 上（见下一条规则）。 */
-  overflow: visible;
+  /* 这里必须裁剪：收成齿轮、展开/收起时靠它把多出来的行藏住。
+     但裁剪框正好贴着内容高度时，入场/换词那 2px 的 translateY 会把右下角
+     （俏皮词胶囊的底边）切掉一条——一行时内容最矮，所以只有「一行」才看得见。
+     解法：上下各加 6px 内边距把裁剪框撑开，再用 -6px 外边距抵回去，
+     外层占位高度一分不差，但裁剪框比内容高 12px，2px 的位移就切不到了。
+     注意不能改成 overflow: visible —— 那样收起途中内容会从 0 高度的框里溢出去，
+     压到上面那条排队消息上，就是「指令堆叠时显示异常」。 */
+  padding-block: 6px; margin-block: -6px;
+  overflow: hidden;
   transition: max-height .18s cubic-bezier(.23, 1, .32, 1), opacity .16s ease;
 }
-/* 收起时才需要裁剪：把内容收干净，不留半截字。 */
-.pgc-strip--handle .pgc-band { max-height: 0; opacity: 0; overflow: hidden; }
+/* 收起时把刚才那 6px 内边距和外边距一起归零，才能真正收成一条细缝。 */
+.pgc-strip--handle .pgc-band { max-height: 0; opacity: 0; padding-block: 0; margin-block: 0; }
 /* DeepSeek 蓝是主色；成功/失败只换强调色，形状和排版保持一致。 */
 .pgc-strip--ok { border-color: color-mix(in srgb, var(--pgc-ok) 24%, transparent); background: color-mix(in srgb, var(--pgc-ok) 8%, transparent); }
 .pgc-strip--error { border-color: color-mix(in srgb, var(--pgc-bad) 28%, transparent); background: color-mix(in srgb, var(--pgc-bad) 9%, transparent); }

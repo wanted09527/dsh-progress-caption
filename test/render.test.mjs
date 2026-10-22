@@ -188,14 +188,20 @@ test('俏皮词占固定宽度，换词不推挤主文案', () => {
   assert.doesNotMatch(flavor[1], /min-width:/, 'min-width 会让宽度跟着词长浮动');
 });
 
-test('一行时不许把俏皮词胶囊切掉一条：平时不裁剪，只有收起时才裁', () => {
-  const band = /\.pgc-band \{([\s\S]*?)\}/.exec(sheet);
-  assert.ok(band, '要能找到 .pgc-band 规则');
-  assert.match(band[1], /overflow: visible/, '平时不裁剪，否则换词时那 2px 位移会把胶囊底边切掉');
-  assert.doesNotMatch(band[1], /overflow: hidden/, '裁剪框贴着内容高度时会切掉底边（一行时最明显）');
+test('一行时不许把俏皮词胶囊切掉一条：靠内边距撑开裁剪框，且必须仍然裁剪', () => {
+  const bandRule = /\.pgc-band \{([\s\S]*?)\}/.exec(sheet);
+  assert.ok(bandRule, '要能找到 .pgc-band 规则');
+  // 去掉注释再看声明，否则注释里提到过的写法会被误判。
+  const band = bandRule[1].replace(/\/\*[\s\S]*?\*\//g, '');
+  assert.match(band, /overflow: hidden/, '必须裁剪，否则收起时内容会溢出去压到上一条消息');
+  assert.doesNotMatch(band, /overflow: visible/, 'overflow: visible 会导致「指令堆叠时显示异常」');
+  assert.match(band, /padding-block: 6px/, '用内边距把裁剪框撑开，2px 位移才切不到胶囊底边');
+  assert.match(band, /margin-block: -6px/, '负外边距抵回去，外层占位高度才不变');
   const handle = /\.pgc-strip--handle \.pgc-band \{([\s\S]*?)\}/.exec(sheet);
-  assert.ok(handle, '收成齿轮时仍要能裁干净');
-  assert.match(handle[1], /overflow: hidden/, '只有收起那一刻才需要裁剪');
+  assert.ok(handle, '收起时要能收成细缝');
+  assert.match(handle[1], /max-height: 0/);
+  assert.match(handle[1], /padding-block: 0/, '收起时内边距也要归零');
+  assert.match(handle[1], /margin-block: 0/, '收起时负外边距也要归零');
 });
 
 test('系统开了「减少动态效果」就把动画全关掉', () => {
