@@ -1542,6 +1542,13 @@ window.__ModuleLoader__.load({
       const pinnedStep = shown && typeof shown.step === 'number' ? shown.step : stepRef.current.step;
       // 整轮最前面这几步状态翻得最勤：不播任何淡入，纯硬切换，把「闪」从根上掐掉。
       const settling = typeof pinnedStep === 'number' && pinnedStep <= SETTLE_STEPS;
+      // 俏皮词换词要「滚上去」：得同时留着上一句，让它往上滚出去，新的一句从底下顶上来。
+      // 这里在渲染期记住「上一个是哪句」——写两遍结果一样，所以重复渲染也不会错位。
+      const flavorRef = React.useRef({ cur: suffix, prev: null });
+      if (flavorRef.current.cur !== suffix) {
+        flavorRef.current = { cur: suffix, prev: flavorRef.current.cur };
+      }
+      const flavorPrev = flavorRef.current.prev;
 
       const status = !shown
         ? ''
@@ -1673,6 +1680,8 @@ window.__ModuleLoader__.load({
         holding ? 'pgc-strip--held' : null,
         showFull ? null : 'pgc-strip--handle',
         settling ? 'pgc-strip--settle' : null,
+        // 有俏皮词时，右边那圈弧线让位（见 .pgc-slot 上面的注释）：一条字幕只留一个东西在动。
+        suffix ? 'pgc-strip--hasflavor' : null,
         'pgc-size-' + settings.size,
         'pgc-anim-' + settings.anim,
         'pgc-flavor-' + settings.flavorStyle,
@@ -1730,9 +1739,24 @@ window.__ModuleLoader__.load({
                 className: 'pgc-slot',
                 'data-pgc-slot': 'loop',
                 'aria-hidden': true,
-              }, h('span', { className: 'pgc-arc' })),
+              }, h('span', { className: 'pgc-arc' },
+                [0, 1, 2].map((i) => h('span', { key: i })))),
               // 俏皮词放最右端：它只是气氛，不属于左边那句状态描述。
-              suffix ? h('span', { className: 'pgc-flavor', key: suffix }, suffix) : null)
+              // 换词时胶囊底色不动，只有里面那条「两行字的履带」整体往上滚半格：
+              // 上一句滚出框、新的一句顶到中间停住。
+              // 原来是把整个胶囊重挂载一次、从 45% 透明度浮上来 —— 每 2.8 秒连底色跟着闪一下，
+              // 那是「生硬」的来源。
+              suffix
+                ? h('span', { className: 'pgc-flavor' },
+                  h('span', {
+                    // key 换掉 = 整条履带重新挂载 = 换词动画从 translateY(0) 重新滚一次。
+                    // 只有滚动体重挂载，胶囊外壳不动，所以底色和边框不会跟着闪。
+                    className: flavorPrev ? 'pgc-flavor-track' : 'pgc-flavor-track pgc-flavor-still',
+                    key: 'roll:' + suffix,
+                  },
+                    h('span', { className: 'pgc-flavor-line', 'aria-hidden': true }, flavorPrev || suffix),
+                    h('span', { className: 'pgc-flavor-line' }, suffix)))
+                : null)
             : null,
           painted && showFull && painted.state === 'error' && painted.rawLine
             ? h('details', { className: 'pgc-detail' },
@@ -1879,15 +1903,36 @@ window.__ModuleLoader__.load({
   /* 状态从「进行中」翻到「成功 / 失败」时，颜色是渐过去的，不是啪一下换掉。 */
   transition: background-color .26s cubic-bezier(.23, 1, .32, 1);
 }
-/* 安静档（默认）：三颗点只做极轻的呼吸，动的是光晕大小，不动位移、不动透明度，
-   所以看着是「它还活着」，而不是「在闪」。 */
-.pgc-anim-calm .pgc-dot { animation: pgc-breathe 2.6s ease-in-out infinite; }
+/* 安静档（默认）：三颗点做「淡 → 亮 → 淡」，相位依次错开 1/3 周期，
+   于是一条小波浪从左往右传过去。
+   旧写法只改 box-shadow 扩散半径、而且三颗完全同步：4px 的点上那点光晕变化根本看不出来，
+   三颗又一齐明暗，肉眼看就是「一动不动」——这就是「第几步后面那个点不动」的来源。
+   周期取 3.2s，跟右边那圈绕圈的点（.pgc-anim-calm .pgc-arc > span）保持一致，
+   一条字幕里不出现两种节奏。 */
+.pgc-anim-calm .pgc-dot { animation: pgc-breathe 3.2s ease-in-out infinite; }
+/* 负延迟 = 提前进入相位。选值要让三颗的「最亮时刻」依次往后排：
+   dot1 在 1.60s、dot2 在 2.67s、dot3 在 3.73s（≡0.53s），波动方向才是左 → 右。 */
+.pgc-anim-calm .pgc-dot:nth-child(2) { animation-delay: -2.13s; }
+.pgc-anim-calm .pgc-dot:nth-child(3) { animation-delay: -1.07s; }
 /* 扫光档：三颗点排队跳起来（0.9s 一轮，相位差 0.3s），配合文字的流光。 */
 .pgc-anim-sweep .pgc-dot { animation: pgc-hop .9s cubic-bezier(.37, 0, .63, 1) infinite; }
 .pgc-anim-sweep .pgc-dot:nth-child(2) { animation-delay: -.6s; }
 .pgc-anim-sweep .pgc-dot:nth-child(3) { animation-delay: -.3s; }
-.pgc-strip--ok .pgc-dot { background: var(--pgc-ok); animation: none; transform: none; opacity: 1; }
-.pgc-strip--error .pgc-dot { background: var(--pgc-bad); animation: none; transform: none; opacity: 1; }
+/* 成功 / 失败态：只换颜色，不再把点冻住。
+   原来这里写 animation: none —— 结果是「动作已经跑完、但这一轮还没收」的那几秒里，
+   左边的点定住了，右边俏皮词还在滚，一边静一边动，看着像坏了。
+   这里刻意**不降速**：早先试过放慢到 6.4s，结果三颗点的相位差被摊薄，
+   实测透明度只有 0.38/0.41/0.38 —— 又变成「看不出在动」。节奏保持 3.2s。 */
+.pgc-strip--ok .pgc-dot,
+.pgc-strip--error .pgc-dot {
+  animation-name: pgc-breathe;
+  animation-duration: 3.2s;
+  animation-timing-function: ease-in-out;
+  animation-iteration-count: infinite;
+  opacity: 1; transform: none;
+}
+.pgc-strip--ok .pgc-dot { background: var(--pgc-ok); }
+.pgc-strip--error .pgc-dot { background: var(--pgc-bad); }
 /* 主文案：一行放不下就省略号，别缩成俩字。
    不再按「行数 2/3」加 line-clamp——主文案是拼出来的整句（十几个字），
    开 2/3 行几乎不会真的折行，视觉上没差别，所以那个设置项已经删了。 */
@@ -1903,6 +1948,7 @@ window.__ModuleLoader__.load({
    淡入/上浮一秒能量播两三次，叠起来就是「一直在闪」。这一步只关「换文案」的动画，
    不动排版，也不关 .pgc-live 的入场动画——那个一次出现只播一次，不是闪烁来源。 */
 .pgc-strip--settle .pgc-flavor,
+.pgc-strip--settle .pgc-flavor-track,
 .pgc-strip--settle .pgc-label { animation: none; }
 /* 扫光：整条字幕从左到右掠过一遍，光带铺满这个框的宽度。
    （原来是 40% 宽的光带只在第一行主文案里走，看起来是「中间闪一下」。）
@@ -1950,9 +1996,13 @@ window.__ModuleLoader__.load({
 .pgc-anim-sweep .pgc-sub::after { content: none; animation: none; }
 /* 俏皮词：不用斜体（中文被强行倾斜很难看），固定占最右一格。
    宽度写死 6.6em：词最短 3 字最长 5 字，写死之后换词时右边这块纹丝不动，
-   左边的状态文字就不会被一会儿推左一会儿推右（这也是「闪」的一个来源）。 */
+   左边的状态文字就不会被一会儿推左一会儿推右（这也是「闪」的一个来源）。
+   换词时外壳（底色 / 圆角 / 宽度）一律不动，只有里面两行字在滚：
+   这个框就是那条「滚槽」，overflow: hidden 把滚出去的那半句裁掉。 */
 .pgc-flavor {
   flex: 0 0 auto; width: 6.6em; max-width: 46%; margin-left: 6px;
+  position: relative; display: inline-flex; align-items: center; justify-content: center;
+  height: 1.6em;
   overflow: hidden; text-overflow: ellipsis; white-space: nowrap; text-align: center;
   font-style: normal; font-weight: 600; font-size: .95em; line-height: 1.6; letter-spacing: .2px;
   color: var(--pgc-accent);
@@ -1961,11 +2011,27 @@ window.__ModuleLoader__.load({
   border-radius: 999px; padding: 0 9px;
   transition: color .18s ease, background-color .18s ease, border-color .18s ease;
 }
+/* 滚槽里的滚动体：上一句在上、新的一句在下，两行竖直叠着，整体往上滚半格。
+   滚动体的高度是滚槽的两倍，所以「滚半格」正好等于「滚一行」——
+   任何一帧，两行之间的距离都恰好是一行，绝不会像各动各的那样在中间叠成一坨。
+   只动 transform，走合成层，不重排，也不推挤左边的主文案。 */
+.pgc-flavor-track {
+  position: absolute; left: 0; right: 0; top: 0; height: 200%;
+  display: flex; flex-direction: column;
+  /* 默认就停在下面那一行（新词）：动画被关掉时等于硬切换，不会停在上一句上。 */
+  transform: translateY(-50%);
+  animation: pgc-flavor-roll .42s cubic-bezier(.25, .46, .45, .94) both;
+}
+.pgc-flavor-line {
+  flex: 0 0 50%;
+  display: flex; align-items: center; justify-content: center;
+  overflow: hidden; white-space: nowrap; text-overflow: ellipsis;
+}
+/* 刚出现（还没有「上一句」）时不要滚：条本身已经在播入场动画，再滚一次就显得吵。 */
+.pgc-flavor-still { animation: none; }
 /* 俏皮词三种样式：淡色底（默认）/ 实心 / 素色（不要底色，只留字）。 */
-/* 换词的时候也做一次同款淡入（起点 .45，不是 0）：宽度写死 6.6em，所以这一步
-   只发生在合成层，左边的状态文字纹丝不动。全静止档由上面的规则统一关掉。 */
-.pgc-anim-calm .pgc-flavor,
-.pgc-anim-sweep .pgc-flavor { animation: pgc-swap .2s cubic-bezier(.23, 1, .32, 1) both; }
+/* 换词动画挂在滚动体上（.pgc-flavor-track 自带 animation），外壳不再挂，
+   所以原来「每个词都连胶囊一起重挂载」的闪烁没有了。全静止档由后面的规则统一关掉。 */
 .pgc-flavor-solid .pgc-flavor { color: #fff; background: var(--pgc-accent); border-color: transparent; }
 .pgc-flavor-plain .pgc-flavor { color: var(--pgc-accent); background: transparent; border-color: transparent; opacity: .92; }
 .pgc-strip--ok .pgc-flavor {
@@ -1986,32 +2052,63 @@ window.__ModuleLoader__.load({
 .pgc-strip--ok .pgc-chip { color: var(--pgc-ok); border-color: color-mix(in srgb, var(--pgc-ok) 48%, transparent); }
 .pgc-strip--error .pgc-chip { color: var(--pgc-bad); border-color: color-mix(in srgb, var(--pgc-bad) 52%, transparent); }
 /* 【原耗时位】原来这里放的是耗时（.pgc-time，已移除：和思维链区域的时间重复）。
-   现在这块地放一根匀速转的细弧线（原来这里是三颗跳动的小点，太吵）：
+   现在这块地放「三个点绕着圈跑」的加载标记（原来是三颗原地跳动的点，太吵；中间试过
+   一根匀速转的弧线，被评价为死板——一段硬边的弧按固定角速度转，看着就是个节拍器）：
    - 盒子宽高写死（3.6em × 1em，宽度与原来的耗时格一致），所以怎么转都不推挤左右；
-   - 弧线本身是 10px 的圆，只画一段弧（其余透明），靠 border 造出来；
-   - 只动 transform（合成层），不改宽高、不重排。 */
+   - 三个点各自跑同一条 0→720° 的过渡曲线，只差 0.18s 的出发时间：曲线两头慢、
+     中间快，所以慢的地方几个点挤成一串、快的地方一下甩开——这是 Windows 开机转圈
+     的手法，转起来有"甩"的感觉，不是匀速转盘；
+   - 0→720° 是整两圈，所以关键帧结束时位置与起点重合；配合两端速度为 0 的对称缓动，
+     循环接缝不会「咯噔」，首尾的淡入淡出只是把"停一下"那口气掩掉；
+   - 点只画 2px，整体 12px（就是 1em），在行里不顶格；
+   - 只动 transform / opacity（合成层），不改宽高、不重排、不遮挡点击。 */
 .pgc-slot {
   flex: 0 0 auto;
   width: 3.6em; height: 1em;
   display: inline-flex; align-items: center; justify-content: center;
+  /* 收起来 / 展开时是渐变的，不是啪一下少一块。 */
+  transition: width .2s cubic-bezier(.23, 1, .32, 1), opacity .2s ease;
 }
+/* 一条字幕里只允许一个东西在动。
+   本来右边那圈绕圈的点转得好好的，俏皮词一加上，两个相邻的小东西（相隔不到 40px、
+   同一个强调色、还有两种不同的节奏：弧线 2.2s 一圈，俏皮词 2.8s 滚一次）就互相抢视线，
+   看的人不知道该盯哪个 —— 这就是「互抢」。
+   规则改成：俏皮词在场时，弧线停转并让出位置；俏皮词不在（只报动作 / 自己关掉了）时弧线照转。
+   两种状态都只有一处动。 */
+.pgc-strip--hasflavor .pgc-slot { width: 0; opacity: 0; pointer-events: none; }
+.pgc-strip--hasflavor .pgc-slot .pgc-arc > span { animation: none; }
 .pgc-arc {
-  width: 10px; height: 10px; box-sizing: border-box;
-  border-radius: 50%;
-  border: 1.5px solid color-mix(in srgb, var(--pgc-accent) 22%, transparent);
-  /* 只留顶边是实色，转起来就是一段缺口在跑。 */
-  border-top-color: var(--pgc-accent);
-  animation: pgc-spin .9s linear infinite;
+  position: relative;
+  width: 12px; height: 12px;
+  display: block;
+  pointer-events: none;
 }
+.pgc-arc > span {
+  position: absolute; inset: 0;
+  opacity: 0;
+  animation: pgc-orbit 2.2s cubic-bezier(.45, .05, .55, .95) infinite;
+}
+/* 点画在每格的正上方，整格旋转，就等于绕圆心公转。 */
+.pgc-arc > span::before {
+  content: '';
+  position: absolute; top: 0; left: 50%;
+  width: 2px; height: 2px; margin-left: -1px;
+  border-radius: 50%;
+  background: var(--pgc-accent);
+}
+/* 静止时的姿态：三个点均分一圈（动画跑起来时 transform 由关键帧接管）。 */
+.pgc-arc > span:nth-child(1) { transform: rotate(0deg); animation-delay: 0s; }
+.pgc-arc > span:nth-child(2) { transform: rotate(120deg); animation-delay: .18s; }
+.pgc-arc > span:nth-child(3) { transform: rotate(240deg); animation-delay: .36s; }
 /* 安静档：转慢一点，别抢注意力。 */
-.pgc-anim-calm .pgc-arc { animation-duration: 1.5s; }
-/* 全静止档：不转，弧线常亮。 */
-.pgc-anim-off .pgc-arc { animation: none; opacity: .6; }
+.pgc-anim-calm .pgc-arc > span { animation-duration: 3.2s; }
+/* 全静止档：不转，三个点常亮成一圈。 */
+.pgc-anim-off .pgc-arc > span { animation: none; opacity: .6; }
 /* 已经成功 / 已经失败：没必要继续转，停住，颜色跟随状态色。 */
-.pgc-strip--ok .pgc-arc,
-.pgc-strip--error .pgc-arc { animation: none; opacity: .75; }
-.pgc-strip--ok .pgc-arc { border-color: var(--pgc-ok); border-top-color: var(--pgc-ok); }
-.pgc-strip--error .pgc-arc { border-color: var(--pgc-bad); border-top-color: var(--pgc-bad); }
+.pgc-strip--ok .pgc-arc > span,
+.pgc-strip--error .pgc-arc > span { animation: none; opacity: .75; }
+.pgc-strip--ok .pgc-arc > span::before { background: var(--pgc-ok); }
+.pgc-strip--error .pgc-arc > span::before { background: var(--pgc-bad); }
 .pgc-strip--handle { padding: 0 10px 2px; background: transparent; border-color: transparent; justify-content: flex-end; }
 /* 状态已经结束、只是还没挂满最短停留时间：保持不透明，靠收起动画收，不要再压暗一次（压暗会被看成闪）。 */
 .pgc-strip--held { opacity: 1; }
@@ -2106,13 +2203,16 @@ window.__ModuleLoader__.load({
 .pgc-anim-off .pgc-dot:nth-child(2), .pgc-anim-off .pgc-dot:nth-child(3) { display: none; }
 .pgc-anim-off .pgc-label::after { content: none; animation: none; }
 /* 「全静止」档真的全静止：入场、换文案、换词都不动，只剩底色过渡（那不算动效）。 */
-.pgc-anim-off .pgc-live, .pgc-anim-off .pgc-label, .pgc-anim-off .pgc-flavor { animation: none; }
+.pgc-anim-off .pgc-live, .pgc-anim-off .pgc-label, .pgc-anim-off .pgc-flavor,
+.pgc-anim-off .pgc-flavor-track { animation: none; }
 @media (prefers-reduced-motion: reduce) {
   .pgc-strip, .pgc-strip * { animation: none !important; transition: none !important; }
   .pgc-label::after { content: none !important; }
   /* 系统开了「减少动态效果」时，也不再做位移和缩放，只留颜色的硬切换。 */
   .pgc-band { max-height: 7em; opacity: 1; }
   .pgc-strip--handle .pgc-band { max-height: 0; opacity: 0; margin-block: 0; padding-block: 0; }
+  /* 不转的时候，点靠 keyframes 才亮起来，这里要补回可见度，否则整个标记会消失。 */
+  .pgc-arc > span { opacity: .6 !important; }
 }
 @keyframes pgc-enter {
   from { opacity: 0; transform: translateY(2px) scale(.984); }
@@ -2124,9 +2224,23 @@ window.__ModuleLoader__.load({
   from { opacity: .45; transform: translateY(2px); }
   to { opacity: 1; transform: none; }
 }
+/* 俏皮词换词：两行字当作一条履带，整体往上滚半格（半格＝一行）。
+   起点是 translateY(0)（露出上一句），终点是 translateY(-50%)（露出新的一句），
+   缓动前段快、后段慢慢落位，所以读起来是「滚上去停住」，不是匀速平移。
+   裁切框（.pgc-flavor 的 overflow: hidden）负责把滚出框的那半句切干净。 */
+@keyframes pgc-flavor-roll {
+  from { transform: translateY(0); }
+  to { transform: translateY(-50%); }
+}
+/* 状态点的呼吸：透明度 .38 → 1，同时抬 1px。
+   形状是「快亮、慢暗」：30% 之后才开始亮，50% 到顶，剩下半程慢慢暗回去。
+   这样三颗错开 1/3 周期时，同一时刻只有一颗在顶上、一颗还压着、一颗正在回落，
+   波浪才看得出方向；用对称的缓入缓出会变成三颗一样亮，等于没动。
+   只动 opacity / transform，不碰宽高（不重排），也不碰 box-shadow（每帧重画阴影更贵）。
+   下限取 .38 而不是 0：点只是暗下去，不会「消失再出现」——那才叫闪。 */
 @keyframes pgc-breathe {
-  0%, 100% { box-shadow: 0 0 0 2px color-mix(in srgb, var(--pgc-accent) 22%, transparent); }
-  50% { box-shadow: 0 0 0 5px color-mix(in srgb, var(--pgc-accent) 6%, transparent); }
+  0%, 30%, 100% { opacity: .38; transform: translateY(0); }
+  50% { opacity: 1; transform: translateY(-1px); }
 }
 /* 扫光档的三点起跳：只动 transform（合成层），不改宽高、不重排。
    起点先压扁一点再弹起（squash & stretch），比匀速上下移动更像有重量的东西；
@@ -2143,12 +2257,15 @@ window.__ModuleLoader__.load({
   0% { transform: translateX(-100%); }
   100% { transform: translateX(100%); }
 }
-/* 预留位上的细弧线：一个只画了一段弧的小圆环，匀速绕自己的圆心转。
-   只动 transform（合成层），不改宽高、不触发重排；
-   周期 .9s，安静档 1.5s，幅度小、存在感低，不在输入框上方抢注意力。 */
-@keyframes pgc-spin {
-  from { transform: rotate(0deg); }
-  to { transform: rotate(360deg); }
+/* 预留位上的加载标记：三个点绕圈。
+   每个点跑同一条 0→720° 的曲线，起点相位差 120°、出发时间差 0.18s；
+   曲线是两头慢中间快的对称缓动，所以收尾速度都是 0，循环接缝处不会「咯噔」一下。
+   全程只动 transform / opacity，走合成层。 */
+@keyframes pgc-orbit {
+  0% { transform: rotate(0deg); opacity: 0; }
+  10% { opacity: 1; }
+  90% { opacity: 1; }
+  100% { transform: rotate(720deg); opacity: 0; }
 }
 `;
 

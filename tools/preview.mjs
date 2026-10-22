@@ -98,8 +98,10 @@ const sheet = (open) => `
         </div>
       </div>`;
 
+const flavor = (word) => `<span class="pgc-flavor"><span class="pgc-flavor-track pgc-flavor-still"><span class="pgc-flavor-line" aria-hidden="true">${word}</span><span class="pgc-flavor-line">${word}</span></span></span>`;
+
 const strip = (state, body, extra = '', anim = 'calm') => `
-      <div class="pgc-strip pgc-strip--${state} pgc-size-m pgc-anim-${anim}" data-plugin="dsh-progress-caption" title="字幕由规则推断，不代表模型真实意图">
+      <div class="pgc-strip pgc-strip--${state} pgc-size-m pgc-anim-${anim}${body.includes('pgc-flavor') ? ' pgc-strip--hasflavor' : ''}" data-plugin="dsh-progress-caption" title="字幕由规则推断，不代表模型真实意图">
         <span class="pgc-sweep" aria-hidden="true"></span>
         <span class="pgc-band">
           <span class="pgc-live" role="status" aria-live="polite">${body}</span>
@@ -124,20 +126,20 @@ ${strip('running', `
           <span class="pgc-step">第 3 步</span>
           <span class="pgc-loader" aria-hidden="true"><span class="pgc-dot"></span><span class="pgc-dot"></span><span class="pgc-dot"></span></span>
           <span class="pgc-label">正在执行命令 npm test</span>
-          <span class="pgc-slot" aria-hidden="true"><span class="pgc-arc"></span></span>
-          <span class="pgc-flavor">琢磨中</span>`)}
+          <span class="pgc-slot" aria-hidden="true"><span class="pgc-arc"><span></span><span></span><span></span></span></span>
+          ${flavor('琢磨中')}`)}
 ${strip('ok', `
           <span class="pgc-step">第 4 步</span>
           <span class="pgc-loader" aria-hidden="true"><span class="pgc-dot"></span><span class="pgc-dot"></span><span class="pgc-dot"></span></span>
           <span class="pgc-label">命令完成 npm test</span>
           <span class="pgc-chip">成功</span>
-          <span class="pgc-slot" aria-hidden="true"><span class="pgc-arc"></span></span>`)}
+          <span class="pgc-slot" aria-hidden="true"><span class="pgc-arc"><span></span><span></span><span></span></span></span>`)}
 ${strip('error', `
           <span class="pgc-step">第 5 步</span>
           <span class="pgc-loader" aria-hidden="true"><span class="pgc-dot"></span><span class="pgc-dot"></span><span class="pgc-dot"></span></span>
           <span class="pgc-label">命令执行失败（exit code 1）</span>
           <span class="pgc-chip">失败</span>
-          <span class="pgc-slot" aria-hidden="true"><span class="pgc-arc"></span></span>`, `
+          <span class="pgc-slot" aria-hidden="true"><span class="pgc-arc"><span></span><span></span><span></span></span></span>`, `
         <details class="pgc-detail">
           <summary class="pgc-detail-sum">看原始报错</summary>
           <code class="pgc-raw">boom\n[exit code: 1]</code>
@@ -146,7 +148,7 @@ ${strip('thinking', `
           <span class="pgc-step">第 2 步</span>
           <span class="pgc-loader" aria-hidden="true"><span class="pgc-dot"></span><span class="pgc-dot"></span><span class="pgc-dot"></span></span>
           <span class="pgc-text"><span class="pgc-label">翻一下配置文件</span></span>
-          <span class="pgc-flavor">酝酿中</span>`)}
+          ${flavor('酝酿中')}`)}
 ${strip('thinking', `
           <span class="pgc-step">第 6 步</span>
           <span class="pgc-loader" aria-hidden="true"><span class="pgc-dot"></span><span class="pgc-dot"></span><span class="pgc-dot"></span></span>
@@ -154,8 +156,8 @@ ${strip('thinking', `
             <span class="pgc-label">看看配置里怎么写的</span>
             <span class="pgc-sub">先看 package.json 的入口，再决定改哪里</span>
           </span>
-          <span class="pgc-slot" aria-hidden="true"><span class="pgc-arc"></span></span>
-          <span class="pgc-flavor">盘算中</span>`)}
+          <span class="pgc-slot" aria-hidden="true"><span class="pgc-arc"><span></span><span></span><span></span></span></span>
+          ${flavor('盘算中')}`)}
 ${strip('thinking', `
           <span class="pgc-step">第 8 步</span>
           <span class="pgc-loader" aria-hidden="true"><span class="pgc-dot"></span><span class="pgc-dot"></span><span class="pgc-dot"></span></span>
@@ -163,13 +165,13 @@ ${strip('thinking', `
             <span class="pgc-label">扫光档：光带横扫整条字幕</span>
             <span class="pgc-sub">第二行也跟着一起扫，不是只扫第一行</span>
           </span>
-          <span class="pgc-slot" aria-hidden="true"><span class="pgc-arc"></span></span>
-          <span class="pgc-flavor">琢磨中</span>`, '', 'sweep')}
+          <span class="pgc-slot" aria-hidden="true"><span class="pgc-arc"><span></span><span></span><span></span></span></span>
+          ${flavor('琢磨中')}`, '', 'sweep')}
 ${strip('thinking', `
           <span class="pgc-step">第 7 步</span>
           <span class="pgc-loader" aria-hidden="true"><span class="pgc-dot"></span><span class="pgc-dot"></span><span class="pgc-dot"></span></span>
           <span class="pgc-text"><span class="pgc-label">npm test 跑完了 · 1.2s</span></span>
-          <span class="pgc-flavor">缓口气</span>`)}
+          ${flavor('缓口气')}`)}
       <div class="pgc-summary"><span class="pgc-summary-text">本回合 · 3 次工具 · 2 成 1 败 · 用时 12.4s</span></div>
     </div>
     <p class="doc">主文案是一整句（动作 + 具体对象），状态靠左侧蓝点与右侧胶囊的双色表示；最后一条是空闲齿轮 + 展开的设置面板。</p>

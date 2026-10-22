@@ -178,7 +178,26 @@ test('整条字幕条没有无限动画；小圆点在安静档只做呼吸，�
   assert.match(sheet, /\.pgc-anim-sweep \.pgc-dot \{ animation: pgc-hop/, '扫光档才让三点跳');
   const breathe = /@keyframes pgc-breathe \{([\s\S]*?)\n\}/.exec(sheet);
   assert.ok(breathe, '要有 pgc-breathe');
-  assert.doesNotMatch(breathe[1], /opacity:/, '呼吸不许动 opacity（会看着在闪）');
+  // 早先这里断言「呼吸不许动 opacity」，理由是「动了就像在闪」。
+  // 但守着 box-shadow 的结果是 4px 的点上根本看不出在动 —— 用户看到的就是「它不动」。
+  // 现在做法反过来：动 opacity，只是下限卡在 .38，不做 0→1 的全灭全亮。
+  assert.match(breathe[1], /opacity: \.38/, '暗的那一端不能低于 .38，否则就成了闪');
+  assert.doesNotMatch(breathe[1], /opacity: 0[;}\s]/, '不许整颗消失再出现');
+  assert.match(breathe[1], /translateY\(-1px\)/, '要有一点位移，光靠透明度在 4px 的点上还是发飘');
+  assert.doesNotMatch(breathe[1], /(width|height|margin|padding|box-shadow):/, '只许动 opacity / transform');
+  // 三颗点必须错相位：同步呼吸＝三颗一齐明暗，那是最像「坏了」的形态。
+  assert.match(sheet, /\.pgc-anim-calm \.pgc-dot:nth-child\(2\) \{ animation-delay: -2\.13s; \}/);
+  assert.match(sheet, /\.pgc-anim-calm \.pgc-dot:nth-child\(3\) \{ animation-delay: -1\.07s; \}/);
+  // 成功 / 失败态不许再把点冻住：那几秒里右边俏皮词还在滚，一边静一边动看着像坏了。
+  const okDots = /\.pgc-strip--ok \.pgc-dot,\s*\n\s*\.pgc-strip--error \.pgc-dot \{([\s\S]*?)\}/.exec(sheet);
+  assert.ok(okDots, '成功/失败态要单独给状态点写规则');
+  assert.doesNotMatch(okDots[1], /animation: none/, '别再冻住状态点');
+  assert.match(okDots[1], /animation-name: pgc-breathe/, '收尾态继续呼吸，不再冻结');
+  // 别把节奏放慢：放慢到 6.4s 会把三颗的相位差摊薄（实测 0.38/0.41/0.38），又变成「看不出在动」。
+  assert.match(okDots[1], /animation-duration: 3\.2s/, '收尾态沿用 3.2s，不许降速');
+  // 「全静止」档仍然要把点彻底关掉，这个例外必须留着。
+  assert.match(sheet, /\.pgc-anim-off \.pgc-dot \{ animation: none; opacity: \.45; \}/,
+    '全静止档不许被上面的呼吸规则拐回来');
   // 三点错相位靠负延迟：没有它们就是三颗点一起闪，那才是「闪」。
   assert.match(sheet, /\.pgc-anim-sweep \.pgc-dot:nth-child\(2\) \{ animation-delay: -\.6s; \}/);
   assert.match(sheet, /\.pgc-anim-sweep \.pgc-dot:nth-child\(3\) \{ animation-delay: -\.3s; \}/);
@@ -285,7 +304,7 @@ test('换文案的动画从半透明起步，不是从 0 闪出来', () => {
   assert.doesNotMatch(swap[1], /opacity: 0[;,}]/, '换文案不许从完全透明开始');
   // 换文案的动画只能挂在「安静 / 扫光」两档上；全静止档必须真的静止。
   assert.match(sheet, /\.pgc-anim-calm \.pgc-label,\s*\n\s*\.pgc-anim-sweep \.pgc-label \{ animation: pgc-swap/);
-  assert.match(sheet, /\.pgc-anim-off \.pgc-live, \.pgc-anim-off \.pgc-label, \.pgc-anim-off \.pgc-flavor \{ animation: none; \}/);
+  assert.match(sheet, /\.pgc-anim-off \.pgc-live, \.pgc-anim-off \.pgc-label, \.pgc-anim-off \.pgc-flavor,\s*\n\s*\.pgc-anim-off \.pgc-flavor-track \{ animation: none; \}/);
   // 只在合成层动：位移和透明度，绝不出现 width/height/margin 之类会重排的属性。
   assert.doesNotMatch(swap[1], /\b(width|height|margin|padding|top|left|right|bottom):/,
     '换文案不许改尺寸或位置属性');
@@ -293,7 +312,7 @@ test('换文案的动画从半透明起步，不是从 0 闪出来', () => {
 
 test('整轮最前面几步不播换文案动画：只关「换字」，不关入场', () => {
   assert.equal(__test.SETTLE_STEPS, 3, '前 3 步是状态翻得最勤的一段');
-  const rule = /\.pgc-strip--settle \.pgc-flavor,\s*\n\s*\.pgc-strip--settle \.pgc-label \{ animation: none; \}/;
+  const rule = /\.pgc-strip--settle \.pgc-flavor,\s*\n\s*\.pgc-strip--settle \.pgc-flavor-track,\s*\n\s*\.pgc-strip--settle \.pgc-label \{ animation: none; \}/;
   assert.match(sheet, rule, '前几步换文案一律硬切换');
   assert.doesNotMatch(sheet, /\.pgc-strip--settle \.pgc-live \{/,
     '入场动画一次出现只播一次，不是闪烁来源，别一起关掉');
@@ -720,6 +739,42 @@ test('把「没线索时」切到只报动作 → 选中项跟着变', () => {
   }
 });
 
+test('一条字幕只留一个东西在动：俏皮词在场时，右边那圈弧线让位', () => {
+  const busy = {
+    partial: { turn: 2, step: 0, blocks: [{ kind: 'reasoning', text: '我先读取配置文件 package.json' }] },
+    runningCalls: [],
+    nodes: [],
+  };
+
+  const withFlavor = render(busy);
+  assert.match(withFlavor.props.className, /pgc-strip--hasflavor/, '有俏皮词时要挂上「让位」标记');
+
+  // 关掉「显示俏皮词」之后弧线应该回来接着转。
+  const previous = globalThis.localStorage;
+  globalThis.localStorage = {
+    getItem: () => JSON.stringify({ words: false }),
+    setItem: () => {},
+  };
+  try {
+    const noFlavor = render(busy);
+    assert.doesNotMatch(noFlavor.props.className, /pgc-strip--hasflavor/, '没有俏皮词就不该让位');
+  } finally {
+    if (previous === undefined) delete globalThis.localStorage;
+    else globalThis.localStorage = previous;
+  }
+
+  // 让位不是「藏起来但还在转」：位置收掉、透明度归零、并且真的停转。
+  const rule = /\.pgc-strip--hasflavor \.pgc-slot \{([\s\S]*?)\}/.exec(sheet);
+  assert.ok(rule, '要有让位规则');
+  assert.match(rule[1], /width: 0/, '宽度要收掉，不然右边会留一个洞');
+  assert.match(rule[1], /opacity: 0/);
+  assert.match(rule[1], /pointer-events: none/);
+  assert.match(sheet, /\.pgc-strip--hasflavor \.pgc-slot \.pgc-arc > span \{ animation: none; \}/,
+    '让位时弧线必须停转，两个东西同时动才是「互抢」');
+  const slot = /\.pgc-slot \{([\s\S]*?)\}/.exec(sheet);
+  assert.match(slot[1], /transition:/, '收起来要是渐变的，别啪一下少一块');
+});
+
 /* ---------------- 本轮优化（2–7）的针对性用例 ---------------- */
 
 test('耗时：一分钟内报秒，超过自动换分秒', () => {
@@ -983,6 +1038,64 @@ test('俏皮词真的画得出来：思考时挂着，且不会被主文案挤�
   assert.ok(text(flavors[0]).trim().length > 0, '俏皮词不能是空的');
 });
 
+test('俏皮词换词是「滚」不是「闪」：外壳不动，只有里面两行字在滚', () => {
+  const view = render({
+    partial: { turn: 3, step: 0, blocks: [{ kind: 'reasoning', text: '我先读取配置文件 package.json' }] },
+    runningCalls: [],
+    nodes: [],
+    turnEnds: new Map(),
+  });
+  let flavor = null;
+  const walk = (node) => {
+    if (!node || typeof node !== 'object') return;
+    if (node.props && node.props.className === 'pgc-flavor') flavor = node;
+    (node.children || []).forEach(walk);
+  };
+  walk(view);
+  assert.ok(flavor, '要有俏皮词');
+  const track = (flavor.children || []).filter(Boolean)[0];
+  assert.ok(track, '滚槽里要有一条履带');
+  assert.match(track.props.className, /pgc-flavor-track/, '滚槽里只放那条履带，不直接放字');
+  assert.match(track.props.className, /pgc-flavor-still/, '首帧还没有「上一句」，不要滚，只淡入');
+
+  const lines = (track.children || []).filter(Boolean);
+  assert.equal(lines.length, 2, '履带上是两行：上一句在上、新的一句在下');
+  assert.ok(lines.every((c) => /pgc-flavor-line/.test(c.props.className)), '履带里只放行');
+  assert.equal(lines[0].props['aria-hidden'], true, '上一句别让读屏念第二遍');
+  assert.ok(!lines[1].props['aria-hidden'], '下面那行才是当前这句');
+  assert.ok(String(text(lines[1])).trim().length > 0, '当前这一行不能是空的');
+
+  // 外壳是滚槽：固定高度 + 裁切，换词时底色和宽度一像素都不动。
+  const shell = /\.pgc-flavor \{([\s\S]*?)\}/.exec(sheet);
+  assert.ok(shell, '要有 .pgc-flavor 规则');
+  assert.match(shell[1], /overflow: hidden/, '滚槽要裁掉滚出去的那半句');
+  assert.match(shell[1], /position: relative/, '履带靠它绝对定位');
+  assert.match(shell[1], /height: [\d.]+em/, '高度锁死，换词不撑高');
+  assert.doesNotMatch(shell[1], /animation:/, '外壳不许再挂动画（原来整颗胶囊跟着闪）');
+
+  // 一条履带整体滚半格：两行永远只差一行，不会中途叠在一起。
+  const trk = /\.pgc-flavor-track \{([\s\S]*?)\}/.exec(sheet);
+  assert.ok(trk, '要有 .pgc-flavor-track 规则');
+  assert.match(trk[1], /height: 200%/, '履带两行高，滚半格＝滚一行');
+  assert.match(trk[1], /flex-direction: column/, '两行竖着叠');
+  assert.match(trk[1], /animation: pgc-flavor-roll/, '换词动画挂在履带上，不挂在行上');
+  assert.match(trk[1], /transform: translateY\(-50%\)/, '默认停在下面那行：动画关掉时不会停在上一句');
+  assert.doesNotMatch(trk[1], /\b(width|margin|padding|top|left|right|bottom):.*\b(px|em)\b\s*;[\s\S]*animation/,
+    '只许动 transform，不许推挤排版');
+
+  const line = /\.pgc-flavor-line \{([\s\S]*?)\}/.exec(sheet);
+  assert.ok(line, '要有 .pgc-flavor-line 规则');
+  assert.match(line[1], /flex: 0 0 50%/, '每行正好半条履带＝一格');
+
+  assert.match(sheet, /\.pgc-flavor-still \{ animation: none; \}/, '首帧那条不滚');
+
+  const kf = /@keyframes pgc-flavor-roll \{([\s\S]*?)\n\}/.exec(sheet);
+  assert.ok(kf, '要有换词关键帧');
+  assert.match(kf[1], /from \{ transform: translateY\(0\)/, '起点露出上一句');
+  assert.match(kf[1], /to \{ transform: translateY\(-50%\)/, '终点露出新的一句');
+  assert.doesNotMatch(kf[1], /\b(width|height|margin|padding|top|left|right|bottom):/, '只许动 transform');
+});
+
 test('有俏皮词时让位给词，没词时显示「进行中」，俏皮词固定在最右', () => {
   const withWords = render({
     partial: { turn: 3, step: 0, blocks: [{ kind: 'reasoning', text: '我先读取配置文件 package.json' }] },
@@ -1007,7 +1120,7 @@ test('有俏皮词时让位给词，没词时显示「进行中」，俏皮词�
   assert.equal(classes[classes.length - 1], 'pgc-flavor', '俏皮词固定在最右');
 });
 
-test('耗时位换成旋转弧线：宽高写死，弧线在槽里，且排在俏皮词左边', () => {
+test('耗时位换成绕圈的点：宽高写死，标记在槽里，且排在俏皮词左边', () => {
   const view = render({
     partial: { turn: 3, step: 0, blocks: [{ kind: 'reasoning', text: '我先读取配置文件 package.json' }] },
     runningCalls: [],
@@ -1028,8 +1141,11 @@ test('耗时位换成旋转弧线：宽高写死，弧线在槽里，且排在�
   assert.equal(slot.props['data-pgc-slot'], 'loop', '给人看的标记');
   assert.equal(slot.props['aria-hidden'], true, '只是装饰，别让读屏念出来');
   const arc = (slot.children || []).filter(Boolean);
-  assert.equal(arc.length, 1, '槽里只装一根弧线');
+  assert.equal(arc.length, 1, '槽里只装一个标记');
   assert.equal(arc[0].props.className, 'pgc-arc');
+  const dots = (arc[0].children || []).filter(Boolean);
+  assert.equal(dots.length, 3, '三个点绕着跑');
+  assert.ok(dots.every((d) => d && d.props && d.props.className === undefined), '点本身不带类名，样式靠 nth-child');
   assert.ok(classes.indexOf('pgc-slot') < classes.indexOf('pgc-flavor'), '动画位排在俏皮词左边');
   assert.ok(!classes.includes('pgc-time'), '耗时那一格已经撤掉了');
 
@@ -1040,15 +1156,31 @@ test('耗时位换成旋转弧线：宽高写死，弧线在槽里，且排在�
   assert.match(rule[1], /height:/, '高度也要锁住');
   assert.match(rule[1], /flex: 0 0 auto/, '不许被压缩');
 
-  // 弧线只许动合成层属性。
+  // 标记本身不接收点击，免得盖住右边的状态胶囊。
   const arcRule = /\.pgc-arc \{([\s\S]*?)\}/.exec(sheet);
   assert.ok(arcRule, '要有 .pgc-arc 规则');
-  assert.match(arcRule[1], /animation: pgc-spin/, '默认就在转');
-  const frames = /@keyframes pgc-spin \{[\s\S]*?\n\}/.exec(sheet);
-  assert.ok(frames, '要有 @keyframes pgc-spin');
-  assert.doesNotMatch(frames[0], /\b(width|height|margin|padding|top|left|right|bottom):/, 'pgc-spin 只许动 transform');
-  assert.match(frames[0], /transform:/, 'pgc-spin 必须真的动起来');
+  assert.match(arcRule[1], /pointer-events: none/, '不许吃点击');
+
+  // 每个点都在跑同一条轨道，只靠 delay 错开出发时间（Windows 开机转圈的做法）。
+  const dotRule = /^\.pgc-arc > span \{([\s\S]*?)\}/m.exec(sheet);
+  assert.ok(dotRule, '要有 .pgc-arc > span 规则');
+  assert.match(dotRule[1], /animation: pgc-orbit/, '默认就在转');
+  assert.match(dotRule[1], /cubic-bezier\(/, '必须用缓动，线性转就是那个「死板」的来源');
+  for (const n of [2, 3]) {
+    assert.match(sheet, new RegExp(`:nth-child\\(${n}\\)[^}]*animation-delay`), `第 ${n} 个点要有错开的出发时间`);
+  }
+
+  const frames = /@keyframes pgc-orbit \{[\s\S]*?\n\}/.exec(sheet);
+  assert.ok(frames, '要有 @keyframes pgc-orbit');
+  assert.doesNotMatch(frames[0], /\b(width|height|margin|padding|top|left|right|bottom):/, 'pgc-orbit 只许动 transform / opacity');
+  assert.match(frames[0], /transform:/, 'pgc-orbit 必须真的动起来');
+  assert.match(frames[0], /rotate\(720deg\)/, '一圈半的行程，才有「甩」的余量');
+  assert.match(frames[0], /opacity:/, '首尾要淡出，接缝才不会咯噔一下');
   assert.match(sheet, /@media \(prefers-reduced-motion: reduce\)/, '系统降级仍然保留');
+  // 降级时不转，但点必须还看得见——它们的可见度平时靠关键帧给。
+  const reduced = /@media \(prefers-reduced-motion: reduce\) \{([\s\S]*?)\n\}/.exec(sheet);
+  assert.ok(reduced, '要能取到降级块');
+  assert.match(reduced[1], /\.pgc-arc > span \{ opacity:/, '降级时把点的可见度补回来');
 });
 
 test('关掉俏皮词后，「进行中」胶囊补回来', () => {
