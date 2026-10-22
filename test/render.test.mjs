@@ -918,7 +918,7 @@ test('有俏皮词时让位给词，没词时显示「进行中」，俏皮词�
   assert.equal(classes[classes.length - 1], 'pgc-flavor', '俏皮词固定在最右');
 });
 
-test('耗时位换成空的预留格：占位还在，什么都不画，且排队在俏皮词左边', () => {
+test('耗时位换成三点循环：宽高写死，点在槽里，且排队在俏皮词左边', () => {
   const view = render({
     partial: { turn: 3, step: 0, blocks: [{ kind: 'reasoning', text: '我先读取配置文件 package.json' }] },
     runningCalls: [],
@@ -935,18 +935,38 @@ test('耗时位换成空的预留格：占位还在，什么都不画，且排�
   const kids = (live.children || []).filter(Boolean);
   const classes = kids.map((c) => (c && c.props && c.props.className) || '');
   const slot = kids.find((c) => c && c.props && c.props.className === 'pgc-slot');
-  assert.ok(slot, '预留格必须在（删了版面会位移）');
-  assert.equal(slot.props['data-pgc-slot'], 'loop', '给人看的标记，以后往这里塞动画');
-  assert.deepEqual(slot.children, [], '现在里面什么都不画');
-  assert.ok(classes.indexOf('pgc-slot') < classes.indexOf('pgc-flavor'), '预留格排在俏皮词左边');
+  assert.ok(slot, '动画位必须在（删了版面会位移）');
+  assert.equal(slot.props['data-pgc-slot'], 'loop', '给人看的标记');
+  assert.equal(slot.props['aria-hidden'], true, '只是装饰，别让读屏念出来');
+  const loop = (slot.children || []).filter(Boolean);
+  assert.equal(loop.length, 1, '槽里装一层循环容器');
+  assert.equal(loop[0].props.className, 'pgc-loop');
+  const dots = (loop[0].children || []).filter(Boolean);
+  assert.equal(dots.length, 3, 'Claude 那种三点');
+  dots.forEach((d) => assert.equal(d.props.className, 'pgc-loop-dot'));
+  assert.ok(classes.indexOf('pgc-slot') < classes.indexOf('pgc-flavor'), '动画位排在俏皮词左边');
   assert.ok(!classes.includes('pgc-time'), '耗时那一格已经撤掉了');
 
-  // 尺寸写死：以后塞进去的动画怎么转，都不会把左右两边挤动。
+  // 尺寸写死：以后改动画怎么跳，都不会把左右两边挤动。
   const rule = /\.pgc-slot \{([\s\S]*?)\}/.exec(sheet);
   assert.ok(rule, '要有 .pgc-slot 规则');
   assert.match(rule[1], /width: 3\.6em/, '宽度与原耗时格一致，俏皮词位置不变');
   assert.match(rule[1], /height:/, '高度也要锁住');
   assert.match(rule[1], /flex: 0 0 auto/, '不许被压缩');
+
+  // 三点只许动合成层属性。
+  const dot = /\.pgc-loop-dot \{([\s\S]*?)\}/.exec(sheet);
+  assert.ok(dot, '要有 .pgc-loop-dot 规则');
+  assert.match(dot[1], /animation: pgc-loop-bounce/, '默认就在跳');
+  const hasKey = (name) => new RegExp(`@keyframes ${name} \\{[\\s\\S]*?\\n\\}`).exec(sheet);
+  for (const name of ['pgc-loop-bounce', 'pgc-loop-bounce-big']) {
+    const frames = hasKey(name);
+    assert.ok(frames, `要有 @keyframes ${name}`);
+    const body = frames[0];
+    assert.doesNotMatch(body, /\b(width|height|margin|padding|top|left|right|bottom):/, `${name} 只许动 transform/opacity`);
+    assert.match(body, /transform:/, `${name} 必须真的动起来`);
+  }
+  assert.match(sheet, /@media \(prefers-reduced-motion: reduce\)/, '系统降级仍然保留');
 });
 
 test('关掉俏皮词后，「进行中」胶囊补回来', () => {

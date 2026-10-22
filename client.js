@@ -1447,16 +1447,19 @@ window.__ModuleLoader__.load({
                 ? h('span', { className: 'pgc-chip' }, status)
                 : null,
               // 这里原来是耗时（`pgc-time`），已移除：那个数字和思维链区域的时间重复，
-              // 而且每秒跳一次还容易抢注意力。位置留给下面的循环动画占位（见下）。
-              // 【预留位】俏皮词左侧的循环动画（具体形式待补充：类 Claude 加载动画 / Windows 转圈）。
-              // 现在只留外壳和固定宽度的占位，什么都不画；以后把动画节点塞进这个 span 即可。
-              // 宽高已经写死在 .pgc-slot 上，所以加动画不会让左右两边重新排版。
+              // 而且每秒跳一次还容易抢注意力。位置现在放 Claude 式的三点循环。
+              // 宽高写死在 .pgc-slot 上（3.6em × 1em，与原来的耗时格一样宽），
+              // 所以三点怎么跳都不会把左右两边挤动，俏皮词的位置也跟以前一致。
               // 不能删：删掉后「状态胶囊 → 俏皮词」的间距会变，看着像排版塌了。
               h('span', {
                 className: 'pgc-slot',
                 'data-pgc-slot': 'loop',
                 'aria-hidden': true,
-              }),
+              },
+              h('span', { className: 'pgc-loop' },
+                h('span', { className: 'pgc-loop-dot' }),
+                h('span', { className: 'pgc-loop-dot' }),
+                h('span', { className: 'pgc-loop-dot' }))),
               // 俏皮词放最右端：它只是气氛，不属于左边那句状态描述。
               suffix ? h('span', { className: 'pgc-flavor', key: suffix }, suffix) : null)
             : null,
@@ -1657,13 +1660,34 @@ window.__ModuleLoader__.load({
 .pgc-chip { flex: 0 0 auto; padding: 0 6px; border: 1px solid color-mix(in srgb, var(--pgc-accent) 38%, transparent); border-radius: 999px; font-size: 11px; color: var(--pgc-accent); }
 .pgc-strip--ok .pgc-chip { color: var(--pgc-ok); border-color: color-mix(in srgb, var(--pgc-ok) 48%, transparent); }
 .pgc-strip--error .pgc-chip { color: var(--pgc-bad); border-color: color-mix(in srgb, var(--pgc-bad) 52%, transparent); }
-/* 【预留位】原来这里放的是耗时（.pgc-time，已移除：和思维链区域的时间重复）。
-   现在留一个空的、宽度固定的盒子，什么都不画，只占住这块地：
-   - 宽度 3.6em 就是原来耗时最小占的宽度，所以右边俏皮词的位置跟以前一致；
-   - 以后把循环动画（形式待补充：类 Claude 加载动画 / Windows 转圈）塞进来，
-     因为盒子宽高已写死，动画怎么转都不会把左右两边挤动。 */
-.pgc-slot { flex: 0 0 auto; width: 3.6em; height: 1em; }
-.pgc-slot:empty { display: inline-block; }
+/* 【原耗时位】原来这里放的是耗时（.pgc-time，已移除：和思维链区域的时间重复）。
+   现在这块地放 Claude 那套「三点循环」：
+   - 盒子宽高写死（3.6em × 1em，宽度与原来的耗时格一致），所以三点怎么跳都不推挤左右；
+   - 三点是三个绝对定位的小圆点，靠 nth-child 负延迟错相位，排队跳；
+   - 只动 transform / opacity（合成层），不改宽高、不重排。 */
+.pgc-slot {
+  flex: 0 0 auto;
+  width: 3.6em; height: 1em;
+  display: inline-flex; align-items: center; justify-content: center;
+}
+.pgc-loop { display: inline-flex; align-items: flex-end; gap: 3px; height: 7px; }
+.pgc-loop-dot {
+  width: 3px; height: 3px; border-radius: 50%;
+  background: var(--pgc-accent); opacity: .5;
+  transform-origin: 50% 100%;
+  animation: pgc-loop-bounce 1.15s cubic-bezier(.36, 0, .64, 1) infinite;
+}
+.pgc-loop-dot:nth-child(2) { animation-delay: -.38s; }
+.pgc-loop-dot:nth-child(3) { animation-delay: -.77s; }
+/* 扫光档：跳得更明显一点（抬得高、亮度起伏大），跟同档的文字流光配套。 */
+.pgc-anim-sweep .pgc-loop-dot { animation-name: pgc-loop-bounce-big; }
+/* 全静止档：完全不动，三颗点常亮。 */
+.pgc-anim-off .pgc-loop-dot { animation: none; opacity: .55; }
+/* 已经成功 / 已经失败：没必要继续跳，停成静止的三颗点，颜色跟随状态色。 */
+.pgc-strip--ok .pgc-loop-dot,
+.pgc-strip--error .pgc-loop-dot { animation: none; opacity: .7; }
+.pgc-strip--ok .pgc-loop-dot { background: var(--pgc-ok); }
+.pgc-strip--error .pgc-loop-dot { background: var(--pgc-bad); }
 .pgc-strip--handle { padding: 0 10px 2px; background: transparent; border-color: transparent; justify-content: flex-end; }
 /* 状态已经结束、只是还没挂满最短停留时间：保持不透明，靠收起动画收，不要再压暗一次（压暗会被看成闪）。 */
 .pgc-strip--held { opacity: 1; }
@@ -1789,6 +1813,20 @@ window.__ModuleLoader__.load({
   30% { transform: translateY(-3px) scale(.92, 1.12); }
 }
 @keyframes pgc-sweep { 0% { background-position: 120% 0; } 100% { background-position: -60% 0; } }
+/* 预留位上的三点循环（Claude 那种）：三颗点共用一条 keyframes，
+   靠 nth-child 的负 animation-delay 错开约三分之一周期，看着像排队跳。
+   只动 transform 和 opacity —— 都是合成层属性，不改宽高、不触发重排；
+   周期 1.15s、每颗点抬 3px，幅度刻意压得小，避免在输入框上方抢注意力。 */
+@keyframes pgc-loop-bounce {
+  0%, 60%, 100% { transform: translateY(0) scale(1, 1); opacity: .45; }
+  30% { transform: translateY(-3px) scale(.92, 1.08); opacity: 1; }
+}
+/* 扫光档：同一套节奏，抬得高一点、亮度起伏大一点，跟文字流光配套。 */
+@keyframes pgc-loop-bounce-big {
+  0%, 60%, 100% { transform: translateY(0) scale(1, 1); opacity: .4; }
+  8% { transform: translateY(0) scale(1.2, .8); opacity: .8; }
+  30% { transform: translateY(-4px) scale(.9, 1.12); opacity: 1; }
+}
 `;
 
     function apply(ctx) {
