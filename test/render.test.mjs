@@ -191,6 +191,27 @@ test('整条字幕条没有无限动画；小圆点在安静档只做呼吸，�
     '起跳只许动 transform，别改宽高（会重排、会抖）');
 });
 
+test('扫光只扫第一行、方向从左到右、光带窄于整行', () => {
+  const after = /\.pgc-anim-sweep \.pgc-label::after \{([\s\S]*?)\n\}/.exec(sheet);
+  assert.ok(after, '要有 .pgc-anim-sweep .pgc-label::after');
+  const rule = after[1].replace(/\/\*[\s\S]*?\*\//g, '');
+  // 只扫第一行：光带挂在 .pgc-label 上，且第二行必须显式关掉。
+  assert.match(sheet, /\.pgc-anim-sweep \.pgc-sub::after \{ content: none; animation: none; \}/,
+    '副行（第二行）必须不扫');
+  // 不整条扫：光带只有这一行的 40% 宽，且不再靠 background-size 撑满。
+  assert.match(rule, /width: 40%/, '光带要窄，不能铺满整行');
+  assert.doesNotMatch(rule, /inset: 0/, 'inset: 0 会让光带铺满整条');
+  assert.doesNotMatch(rule, /background-size/, '整条底色一起亮就是「整条一起扫」');
+  // 左到右：从 -100%（藏在左边外面）走到正数（越过右边界）。
+  const sweep = /@keyframes pgc-sweep \{([\s\S]*?)\n\}/.exec(sheet);
+  assert.ok(sweep, '要有 pgc-sweep');
+  assert.match(sweep[1], /0% \{ transform: translateX\(-100%\); \}/, '起点在左边界外面');
+  assert.match(sweep[1], /100% \{ transform: translateX\(350%\); \}/, '终点越过右边界');
+  assert.doesNotMatch(sweep[1], /background-position/, '老实现是右到左，必须彻底换掉');
+  assert.doesNotMatch(sweep[1], /\b(width|height|margin|padding|top|left|right|bottom):/,
+    '扫光只许动 transform');
+});
+
 test('俏皮词占固定宽度，换词不推挤主文案', () => {
   const flavor = /\.pgc-flavor \{([\s\S]*?)\}/.exec(sheet);
   assert.ok(flavor, '要能找到 .pgc-flavor 规则');

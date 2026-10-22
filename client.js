@@ -1622,7 +1622,29 @@ window.__ModuleLoader__.load({
    只在「安静 / 扫光」两档挂动画，「全静止」档连这个也关掉。 */
 .pgc-anim-calm .pgc-label,
 .pgc-anim-sweep .pgc-label { animation: pgc-swap .16s cubic-bezier(.23, 1, .32, 1) both; }
-.pgc-anim-sweep .pgc-label::after { content: ''; position: absolute; inset: 0; pointer-events: none; background-image: linear-gradient(100deg, transparent 38%, color-mix(in srgb, var(--pgc-accent) 28%, transparent) 50%, transparent 62%); background-size: 260% 100%; background-repeat: no-repeat; animation: pgc-sweep 2.2s linear infinite; }
+/* 扫光：只扫「第一行主文案」，不扫整条。
+   - 光带是 .pgc-label 自己身上的 ::after，父级本来就 overflow: hidden，
+     所以它永远出不了这一行，也压不到下面那行副行（.pgc-sub）；
+   - 宽度只占这一行的 40%，看到的是一道窄光划过，而不是整条底色一起亮；
+   - 方向严格从左到右：translateX 从 -100%（整道藏在左边界外）走到 350%（完全划出右边界）；
+   - 只动 transform，不改宽高、不改 background-size，不起重排。 */
+.pgc-anim-sweep .pgc-label::after {
+  content: '';
+  position: absolute;
+  top: 0; bottom: 0; left: 0;
+  width: 40%;
+  pointer-events: none;
+  background-image: linear-gradient(
+    90deg,
+    transparent 0%,
+    color-mix(in srgb, var(--pgc-accent) 26%, transparent) 50%,
+    transparent 100%
+  );
+  transform: translateX(-100%);
+  animation: pgc-sweep 2.2s cubic-bezier(.45, .05, .55, .95) infinite;
+}
+/* 第二行（思考原话）不扫：这里显式关掉，免得以后有人给 .pgc-sub 加同名规则时被顺带扫到。 */
+.pgc-anim-sweep .pgc-sub::after { content: none; animation: none; }
 /* 俏皮词：不用斜体（中文被强行倾斜很难看），固定占最右一格。
    宽度写死 6.6em：词最短 3 字最长 5 字，写死之后换词时右边这块纹丝不动，
    左边的状态文字就不会被一会儿推左一会儿推右（这也是「闪」的一个来源）。 */
@@ -1812,7 +1834,12 @@ window.__ModuleLoader__.load({
   8% { transform: translateY(0) scale(1.28, .72); }
   30% { transform: translateY(-3px) scale(.92, 1.12); }
 }
-@keyframes pgc-sweep { 0% { background-position: 120% 0; } 100% { background-position: -60% 0; } }
+/* 扫光关键帧：光带贴着第一行的左边界外面出发，一路划到右边界外面。
+   -100% 时这道光完全在裁剪框左侧看不见；350% 时它已整条越过右边界（50% 是一半宽度在框内）。 */
+@keyframes pgc-sweep {
+  0% { transform: translateX(-100%); }
+  100% { transform: translateX(350%); }
+}
 /* 预留位上的三点循环（Claude 那种）：三颗点共用一条 keyframes，
    靠 nth-child 的负 animation-delay 错开约三分之一周期，看着像排队跳。
    只动 transform 和 opacity —— 都是合成层属性，不改宽高、不触发重排；

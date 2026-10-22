@@ -98,8 +98,8 @@ const sheet = (open) => `
         </div>
       </div>`;
 
-const strip = (state, body, extra = '') => `
-      <div class="pgc-strip pgc-strip--${state} pgc-size-m pgc-anim-calm" data-plugin="dsh-progress-caption" title="字幕由规则推断，不代表模型真实意图">
+const strip = (state, body, extra = '', anim = 'calm') => `
+      <div class="pgc-strip pgc-strip--${state} pgc-size-m pgc-anim-${anim}" data-plugin="dsh-progress-caption" title="字幕由规则推断，不代表模型真实意图">
         <span class="pgc-live" role="status" aria-live="polite">${body}</span>
         ${extra}
         ${sheet(false)}
@@ -150,7 +150,16 @@ ${strip('thinking', `
             <span class="pgc-sub">先看 package.json 的入口，再决定改哪里</span>
           </span>
           <span class="pgc-slot" aria-hidden="true"><span class="pgc-loop"><span class="pgc-loop-dot"></span><span class="pgc-loop-dot"></span><span class="pgc-loop-dot"></span></span></span>
-          <span class="pgc-flavor">盘算中</span>`, '', 2)}
+          <span class="pgc-flavor">盘算中</span>`)}
+${strip('thinking', `
+          <span class="pgc-step">第 8 步</span>
+          <span class="pgc-loader" aria-hidden="true"><span class="pgc-dot"></span><span class="pgc-dot"></span><span class="pgc-dot"></span></span>
+          <span class="pgc-text">
+            <span class="pgc-label">扫光档：光带只划第一行</span>
+            <span class="pgc-sub">这一行是思考原话，不参与扫光</span>
+          </span>
+          <span class="pgc-slot" aria-hidden="true"><span class="pgc-loop"><span class="pgc-loop-dot"></span></span></span>
+          <span class="pgc-flavor">琢磨中</span>`, '', 'sweep')}
 ${strip('thinking', `
           <span class="pgc-step">第 7 步</span>
           <span class="pgc-loader" aria-hidden="true"><span class="pgc-dot"></span><span class="pgc-dot"></span><span class="pgc-dot"></span></span>
