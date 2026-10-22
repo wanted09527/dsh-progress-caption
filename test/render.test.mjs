@@ -188,6 +188,16 @@ test('俏皮词占固定宽度，换词不推挤主文案', () => {
   assert.doesNotMatch(flavor[1], /min-width:/, 'min-width 会让宽度跟着词长浮动');
 });
 
+test('一行时不许把俏皮词胶囊切掉一条：平时不裁剪，只有收起时才裁', () => {
+  const band = /\.pgc-band \{([\s\S]*?)\}/.exec(sheet);
+  assert.ok(band, '要能找到 .pgc-band 规则');
+  assert.match(band[1], /overflow: visible/, '平时不裁剪，否则换词时那 2px 位移会把胶囊底边切掉');
+  assert.doesNotMatch(band[1], /overflow: hidden/, '裁剪框贴着内容高度时会切掉底边（一行时最明显）');
+  const handle = /\.pgc-strip--handle \.pgc-band \{([\s\S]*?)\}/.exec(sheet);
+  assert.ok(handle, '收成齿轮时仍要能裁干净');
+  assert.match(handle[1], /overflow: hidden/, '只有收起那一刻才需要裁剪');
+});
+
 test('系统开了「减少动态效果」就把动画全关掉', () => {
   assert.match(sheet, /@media \(prefers-reduced-motion: reduce\)/);
   assert.match(sheet, /animation: none !important/);
