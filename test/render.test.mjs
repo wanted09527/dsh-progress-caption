@@ -192,10 +192,21 @@ test('整条字幕条没有无限动画；小圆点在安静档只做呼吸，�
 });
 
 test('扫光横扫整条、方向从左到右、光带与整框同宽', () => {
-  const after = /\.pgc-anim-sweep \.pgc-band::after \{([\s\S]*?)\n\}/.exec(sheet);
-  assert.ok(after, '要有 .pgc-anim-sweep .pgc-band::after');
+  // 光带挂在整个胶囊的覆盖层上，而不是文字格 .pgc-band：
+  // band 只是「文字那一格」，右边齿轮那一列不在里面，光扫到 band 右边界就断，
+  // 看着就是「右边少一块、没铺满」。覆盖层 inset: 0 才是整条。
+  const after = /\.pgc-anim-sweep \.pgc-sweep::after \{([\s\S]*?)\n\}/.exec(sheet);
+  assert.ok(after, '要有 .pgc-anim-sweep .pgc-sweep::after');
+  const layer = /\.pgc-anim-sweep \.pgc-sweep \{([\s\S]*?)\n\}/.exec(sheet);
+  assert.ok(layer, '要有覆盖层 .pgc-sweep');
+  assert.match(layer[1], /position: absolute/, '覆盖层脱离流，不参与排版');
+  assert.match(layer[1], /inset: 0/, '铺满整条胶囊（含齿轮那一格）');
+  assert.match(layer[1], /border-radius: inherit/, '光的边界是胶囊圆角，不是方块');
+  assert.match(layer[1], /overflow: hidden/, '要把超出圆角的光裁掉');
+  assert.match(layer[1], /pointer-events: none/, '光不许挡住点齿轮');
+  assert.match(layer[1], /display: block/);
   const rule = after[1].replace(/\/\*[\s\S]*?\*\//g, '');
-  // 整条扫：光带挂在裁剪框 .pgc-band 上，不再只挂第一行。
+  // 整条扫：光带挂在整条覆盖层上，不再只挂第一行。
   const labelAfter = /\.pgc-anim-sweep \.pgc-label::after \{([\s\S]*?)\n\}/.exec(sheet);
   assert.ok(labelAfter, '主文案上的老光带规则要保留一行显式关掉');
   assert.match(labelAfter[1], /content: none/, '主文案自己不再挂扫光（整条已经一起扫）');
@@ -215,6 +226,27 @@ test('扫光横扫整条、方向从左到右、光带与整框同宽', () => {
   assert.doesNotMatch(sweep[1], /background-position/, '老实现是右到左，必须彻底换掉');
   assert.doesNotMatch(sweep[1], /\b(width|height|margin|padding|top|left|right|bottom):/,
     '扫光只许动 transform');
+  // 根节点必须是定位上下文，否则 absolute 的覆盖层会跑到外层去。
+  const stripRule = /\.pgc-strip \{([\s\S]*?)\}/.exec(sheet);
+  assert.match(stripRule[1], /position: relative/, '.pgc-strip 要当覆盖层的定位参照');
+  // 收成齿轮时没内容可扫，别再闪一下。
+  assert.match(sheet, /\.pgc-strip--handle \.pgc-sweep \{ display: none !important; \}/);
+  // DOM 上真的挂了这个覆盖层，且是纯装饰。
+  const view = render({
+    partial: { turn: 1, step: 1, blocks: [{ kind: 'reasoning', text: '嗯……' }] },
+    runningCalls: [],
+    nodes: [],
+    endEnds: new Map(),
+  });
+  let layerNode = null;
+  const walk = (node) => {
+    if (!node || typeof node !== 'object') return;
+    if (node.props && node.props.className === 'pgc-sweep') layerNode = node;
+    (node.children || []).forEach(walk);
+  };
+  walk(view);
+  assert.ok(layerNode, '渲染树里要有 .pgc-sweep');
+  assert.equal(layerNode.props['aria-hidden'], true);
 });
 
 test('俏皮词占固定宽度，换词不推挤主文案', () => {

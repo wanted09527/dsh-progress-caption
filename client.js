@@ -1686,6 +1686,10 @@ window.__ModuleLoader__.load({
         title: t('disclaimer'),
         style: Object.keys(colorVars).length > 0 ? colorVars : undefined,
       },
+        // 扫光的覆盖层：铺满整条胶囊（含右侧齿轮那一格），由 CSS 在「扫光」档才显示。
+        // 必须挂在根节点上而不是 .pgc-band 里——band 只是文字那一格，
+        // 光扫到 band 右边界就断了，右边齿轮区会留一块没扫到的空白，看着就是没铺满。
+        h('span', { className: 'pgc-sweep', 'aria-hidden': true }),
         // 收起时不再「整段不渲染」：内容留着，由 .pgc-band 的高度/透明度过渡把它收掉。
         // 这样字的淡出和条的收缩是同一个动作；也免得读屏念一遍已经看不见的字（收起时 aria-hidden）。
         h('span', { className: 'pgc-band', 'aria-hidden': showFull ? undefined : 'true' },
@@ -1821,6 +1825,9 @@ window.__ModuleLoader__.load({
   border: 1px solid color-mix(in srgb, var(--pgc-accent) 20%, transparent);
   background: color-mix(in srgb, var(--pgc-accent) 8%, transparent);
   line-height: 1.4; color: var(--dsw-alias-label-primary, inherit);
+  /* 扫光覆盖层 .pgc-sweep 按整条胶囊定位（inset: 0），所以这里必须有定位上下文。
+     设置面板自己有 position: relative，不受影响。 */
+  position: relative;
   /* 根节点故意不挂 animation：它一挂，任何一次重渲染都可能让整条重播一遍，
      那就是「闪」。入场交给 .pgc-band 的收放过渡，视觉上是一整块浮出来。 */
   transition: background-color .2s ease, border-color .2s ease, padding .2s cubic-bezier(.23, 1, .32, 1);
@@ -1828,6 +1835,9 @@ window.__ModuleLoader__.load({
 /* 思考/工具/状态切换时只换底色和描边，绝不重排：整条的高度、位置都不动。 */
 .pgc-band {
   display: flex; align-items: center; gap: 0; min-width: 0; flex: 1 1 auto;
+  /* 光在覆盖层 .pgc-sweep 上从整条胶囊底下扫过去，文字要压在上面才不被染色。
+     这里给个定位 + z-index: 1，把整块文字层抬到 .pgc-sweep（z-index: auto）之上。 */
+  position: relative; z-index: 1;
   /* 7em 是给「主文案 + 副行」留的上限。
      收放用 max-height（会触发布局，这是唯一一处：不收高度就只能留个空壳），
      时长压到 180ms 并把缓动换成强 ease-out，看上去是一口气收掉而不是慢慢挤。 */
@@ -1896,14 +1906,28 @@ window.__ModuleLoader__.load({
 .pgc-strip--settle .pgc-label { animation: none; }
 /* 扫光：整条字幕从左到右掠过一遍，光带铺满这个框的宽度。
    （原来是 40% 宽的光带只在第一行主文案里走，看起来是「中间闪一下」。）
-   - 挂在 .pgc-band 上（它是整条内容的裁剪框，overflow: hidden，高度会随收放过渡），
-     这样光带横扫的是「整条」，从最左边界外出发、走到最右边界外；
+   - 挂在一个铺满整条胶囊的覆盖层 .pgc-sweep 上，而不是 .pgc-band 上：
+     band 只是「文字那一格」，右边放齿轮的那一列不在它里面，
+     光扫到 band 右边界就断了，看着就是「没有占满、右边少一块」。
+   - 覆盖层 inset: 0 + border-radius: inherit + overflow: hidden：
+     光的边界就是整条胶囊的圆角轮廓，齿轮那一格也一起被扫到；
    - width: 100%：光带本身就有整框那么宽，配合 translateX(-100%) → translateX(100%)
      正好是「左边界外 → 右边界外」，全程没有局部聚集；
    - 渐变是「透明 → 亮 → 透明」横跨整条，所以扫过时看到的是均匀一道光，不是中间一个点；
+   - pointer-events: none：光只是画的，不影响点齿轮；
    - 只动 transform（合成层），不改宽高、不起重排。 */
-.pgc-anim-sweep .pgc-band { position: relative; overflow: hidden; }
-.pgc-anim-sweep .pgc-band::after {
+/* 扫光覆盖层：默认不存在，只有「扫光」档才铺开。
+   收成齿轮时也没有内容可扫，一并关掉，免得那颗小胶囊上闪一下。 */
+.pgc-sweep { display: none; }
+.pgc-strip--handle .pgc-sweep { display: none !important; }
+.pgc-anim-sweep .pgc-sweep {
+  display: block;
+  position: absolute; inset: 0;
+  border-radius: inherit;
+  overflow: hidden;
+  pointer-events: none;
+}
+.pgc-anim-sweep .pgc-sweep::after {
   content: '';
   position: absolute;
   top: 0; bottom: 0; left: 0;
@@ -1998,7 +2022,7 @@ window.__ModuleLoader__.load({
 .pgc-raw { display: block; margin-top: 4px; padding: 4px 6px; border-radius: 6px; background: color-mix(in srgb, currentColor 8%, transparent); font-size: 11px; white-space: pre-wrap; }
 /* 设置：齿轮 + 浮层面板。颜色取 DSH Theme 服务暴露的 --dsw-alias-* 变量，
    没有变量时退回 currentColor 混色，明暗主题都能自动跟随。 */
-.pgc-settings { flex: 0 0 auto; position: relative; display: flex; align-items: center; }
+.pgc-settings { flex: 0 0 auto; position: relative; display: flex; align-items: center; z-index: 2; }
 .pgc-gear {
   width: 22px; height: 22px; display: grid; place-items: center; padding: 0; margin-left: 2px;
   border: 1px solid transparent; border-radius: 999px; background: transparent;

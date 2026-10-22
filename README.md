@@ -167,6 +167,13 @@ v4.1-flash 这类模型思考极快，字是一串串来的。如果字幕逐字
   `translateY` 又会把俏皮词胶囊的底边切掉一条（只有一行时看得见）。所以给自己加
   `padding-block: 6px; margin-block: -6px`——把裁剪框上下各撑开 6px，再用负外边距抵回去，
   外层占位高度一分不差，位移就切不到了。收起时这两项一起归零，收得干净。
+- **扫光要挂在整条胶囊上，不能挂在 `.pgc-band` 上**。`.pgc-band` 只是「文字那一格」，
+  右侧放齿轮的 `.pgc-settings` 是它的兄弟节点、不在它里面；光挂在 band 上，扫到 band 右边界
+  就断了，右边齿轮那一格永远是暗的，看着就是「光效没占满」。所以根节点里加了一个纯装饰的
+  `<span class="pgc-sweep">`，`position: absolute; inset: 0; border-radius: inherit;
+  overflow: hidden; pointer-events: none`——光的边界就是整条胶囊的圆角轮廓（齿轮那一格也扫得到），
+  又不挡点击。`.pgc-strip` 因此必须有 `position: relative` 当它的定位参照。
+  光带本身 `width: 100%` + `translateX(-100%) → translateX(100%)`，是「从左边外面整道扫到右边外面」。
 
 **出现与收起怎么过渡**：
 

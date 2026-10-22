@@ -100,13 +100,18 @@ const sheet = (open) => `
 
 const strip = (state, body, extra = '', anim = 'calm') => `
       <div class="pgc-strip pgc-strip--${state} pgc-size-m pgc-anim-${anim}" data-plugin="dsh-progress-caption" title="字幕由规则推断，不代表模型真实意图">
-        <span class="pgc-live" role="status" aria-live="polite">${body}</span>
-        ${extra}
+        <span class="pgc-sweep" aria-hidden="true"></span>
+        <span class="pgc-band">
+          <span class="pgc-live" role="status" aria-live="polite">${body}</span>
+          ${extra}
+        </span>
         ${sheet(false)}
       </div>`;
 
 const handle = `
       <div class="pgc-strip pgc-strip--handle" data-plugin="dsh-progress-caption">
+        <span class="pgc-sweep" aria-hidden="true"></span>
+        <span class="pgc-band" aria-hidden="true"></span>
         ${sheet(true)}
       </div>`;
 
