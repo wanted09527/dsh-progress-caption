@@ -224,15 +224,25 @@ npm pack --pack-destination dist --cache .npm-cache       # 产出 dist/*.tgz
 
 ## 截图
 
-静态预览图 `preview.png`（浅色 + 深色两套，含展开的设置面板）：
+静态预览图（浅色 + 深色两套，含展开的设置面板）：
 
 ![预览](docs/screenshot.png)
 
 真实会话里的画面等重启 DSH 后再补。
 
-## 许可
+## 与宿主的约定
 
-MIT
+字幕组件靠宿主通过槽位注入的两个 props 工作，两者缺一，插件会安静地不显示任何东西（不会有报错）：
+
+| prop | 用途 | 缺失时 |
+| --- | --- | --- |
+| `useChat` | 读取当前会话快照（`legacy.partial` / `runningCalls` / `nodes` / `turnEnds`） | 字幕退化成只有齿轮，不报错 |
+| `t` | 取中英文案（来自 `locale: 'dshProgressCaption'`） | 回退到内置中文 |
+
+## 卸载
+
+在插件管理器里移除 `dsh-progress-caption` 这一行即可；浏览器里的设置（`localStorage` 键
+`dsh-progress-caption:settings`）不进 profile，卸载后残留也无副作用，想清干净可在开发者工具里删掉这个键。
 
 ## 许可证
 

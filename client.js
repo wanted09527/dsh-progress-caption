@@ -262,7 +262,6 @@ window.__ModuleLoader__.load({
         failExit: '命令执行失败（exit code {code}）',
         failKilled: '命令被终止（exit code null）',
         detail: '看原始报错',
-        elapsed: '{s}s',
         elapsedMin: '{m}分{s}秒',
         sumTurn: '本回合',
         sumTools: '{n} 次工具',
@@ -325,7 +324,6 @@ window.__ModuleLoader__.load({
         failExit: 'command failed (exit code {code})',
         failKilled: 'command was killed (exit code null)',
         detail: 'show the raw error',
-        elapsed: '{s}s',
         elapsedMin: '{m}m {s}s',
         sumTurn: 'Turn',
         sumTools: '{n} tools',
@@ -1270,7 +1268,7 @@ window.__ModuleLoader__.load({
   color: var(--dsw-alias-brand-primary, #4d6bfe);
   background: color-mix(in srgb, var(--dsw-alias-brand-primary, #4d6bfe) 15%, transparent);
   border: 1px solid color-mix(in srgb, var(--dsw-alias-brand-primary, #4d6bfe) 30%, transparent);
-  border-radius: 999px; padding: 0 9px; margin-left: 1px;
+  border-radius: 999px; padding: 0 9px;
 }
 .pgc-strip--ok .pgc-flavor {
   color: var(--dsw-alias-state-success-primary, #2f9e68);
@@ -1355,7 +1353,6 @@ window.__ModuleLoader__.load({
 .pgc-switch[data-on='true'] .pgc-switch-label { color: var(--dsw-alias-label-primary, currentColor); }
 .pgc-anim-off .pgc-dot { animation: none; opacity: .45; }
 .pgc-anim-off .pgc-label::after { content: none; animation: none; }
-@media (max-width: 720px) { .pgc-note { display: none; } }
 @media (prefers-reduced-motion: reduce) {
   .pgc-strip, .pgc-strip * { animation: none !important; transition: none !important; }
   .pgc-label::after { content: none !important; }
@@ -1366,9 +1363,9 @@ window.__ModuleLoader__.load({
 `;
 
     function apply(ctx) {
-      translate = ctx.locale.bind(NS);
-
+      // 先注册字典再取绑定：反过来的话，注册完成前那一小段时间里 t() 会直接返回 key 名。
       ctx.effect(() => ctx.locale.register(NS, DICT), 'dsh-progress-caption: locale dictionaries');
+      translate = ctx.locale.bind(NS);
 
       ctx.effect(() => {
         const tag = document.createElement('style');
