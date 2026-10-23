@@ -191,10 +191,10 @@ test('整条字幕条没有无限动画；状态点是三颗，靠负延迟接�
   assert.match(sheet, /\.pgc-dot:nth-child\(2\) \{ left: 7px; \}/, '第二颗右移一格');
   assert.match(sheet, /\.pgc-dot:nth-child\(3\) \{ left: 14px; \}/, '第三颗再右移一格');
 
-  // 安静 / 扫光两档都在跳，只是周期不同；同一套 keyframes，不抄第二份。
-  assert.match(sheet, /\.pgc-anim-calm \.pgc-dot,[\s\S]*?\.pgc-anim-sweep \.pgc-dot \{\s*animation: pgc-dot-bounce var\(--pgc-dot-period\) ease infinite alternate;\s*\}/,
+  // 经典三点的弹跳：两档共用同一套 keyframes，靠变量换周期。
+  assert.match(sheet, /\.pgc-anim-calm \.pgc-loader\[data-pgc-shape="plain"\] \.pgc-dot,[\s\S]*?animation: pgc-dot-bounce var\(--pgc-dot-period\) ease infinite alternate;/,
     '两档共用同一条弹跳，靠变量换周期');
-  assert.match(sheet, /\.pgc-anim-sweep \.pgc-loader \{ --pgc-dot-period: var\(--pgc-hop-cycle\); \}/,
+  assert.match(sheet, /\.pgc-anim-sweep \.pgc-loader\[data-pgc-shape="plain"\] \{ --pgc-dot-period: var\(--pgc-hop-cycle\); \}/,
     '扫光档换成快周期，跟文字的光带对上');
   // 负延迟是「接力」的全部秘密：三颗错开 1 周期 / 3/5 / 2/5。
   assert.match(sheet, /animation-delay: calc\(-1 \* var\(--pgc-dot-period\)\)/, '第一颗错开整周期');
@@ -533,11 +533,11 @@ const { __test } = mod;
 test('设置：坏值一律兜底回默认', () => {
   assert.deepEqual(__test.normalizeSettings(null), __test.DEFAULT_SETTINGS);
   assert.deepEqual(__test.normalizeSettings({ size: 'xxl', subLine: 'yes', anim: 'boom', shape: 'donut', words: 'yes' }), {
-    size: 'm', subLine: true, anim: 'calm', words: true, factsOnly: false,
+    size: 'm', subLine: true, anim: 'calm', motion: 'plain', words: true, factsOnly: false,
     accent: 'theme', okColor: 'theme', badColor: 'theme', flavorStyle: 'tint',
   });
   assert.deepEqual(__test.normalizeSettings({ size: 'l', subLine: true, anim: 'off', words: false, factsOnly: true }), {
-    size: 'l', subLine: true, anim: 'off', words: false, factsOnly: true,
+    size: 'l', subLine: true, anim: 'off', motion: 'plain', words: false, factsOnly: true,
     accent: 'theme', okColor: 'theme', badColor: 'theme', flavorStyle: 'tint',
   });
   // 老存档里那个 shape 字段不再读：形态只有一种，存进来也不认。
@@ -772,6 +772,71 @@ test('把「没线索时」切到只报动作 → 选中项跟着变', () => {
   }
 });
 
+test('状态标记：默认是经典三点，打开 Claude 三态才换成三种轮着放', () => {
+  const busy = {
+    partial: { turn: 2, step: 0, blocks: [{ kind: 'reasoning', text: '看看配置' }] },
+    runningCalls: [],
+    nodes: [],
+  };
+  const shapeOf = (view) => {
+    let found = null;
+    const walk = (node) => {
+      if (!node || typeof node !== 'object') return;
+      if (node.props && node.props.className === 'pgc-loader') found = node.props['data-pgc-shape'];
+      (node.children || []).forEach(walk);
+    };
+    walk(view);
+    return found;
+  };
+
+  // 默认：不认 Claude 三态，形态名写死 plain。
+  assert.equal(shapeOf(render(busy)), 'plain', '默认走经典三点');
+
+  // 打开之后，形态取自 CLAUDE_SHAPES（弹跳 / 斜线 / 绕圈）。
+  const previous = globalThis.localStorage;
+  globalThis.localStorage = {
+    getItem: () => JSON.stringify({ motion: 'claude' }),
+    setItem: () => {},
+  };
+  try {
+    const shape = shapeOf(render(busy));
+    assert.ok(['bounce', 'line', 'orbit'].includes(shape), '要落在 Claude 的三种形态里，而不是 plain');
+  } finally {
+    if (previous === undefined) delete globalThis.localStorage;
+    else globalThis.localStorage = previous;
+  }
+});
+
+test('Claude 三态的关键帧都齐：弹跳 / 斜线 / 四条绕圈轨道', () => {
+  assert.match(sheet, /@keyframes pgc-dot-line \{/, '要有斜线轨道');
+  for (const n of [1, 2, 3, 4]) {
+    assert.match(sheet, new RegExp('@keyframes pgc-dot-orbit-' + n + ' \{'), '绕圈要有第 ' + n + ' 条轨道');
+  }
+  // 名里不许出现 pgc-shape-：那是被删掉的三套形态留下的禁区。
+  assert.doesNotMatch(sheet, /pgc-shape-/, '三套形态已删，绕圈轨道用 pgc-dot-orbit-* 命名');
+  // 三条轨道各按 1/4 相位分给四颗点，顺序与 Claude 源码一致：2→2、3→4、4→3。
+  assert.match(sheet, /\[data-pgc-shape="orbit"\] \.pgc-dot:nth-child\(2\)[^{]*\{[^}]*pgc-dot-orbit-2/, '第二颗走 orbit-2');
+  assert.match(sheet, /\[data-pgc-shape="orbit"\] \.pgc-dot:nth-child\(3\)[^{]*\{[^}]*pgc-dot-orbit-4/, '第三颗走 orbit-4');
+  assert.match(sheet, /\[data-pgc-shape="orbit"\] \.pgc-dot:nth-child\(4\)[^{]*\{[^}]*pgc-dot-orbit-3/, '第四颗走 orbit-3');
+  // 第四颗只有绕圈用得上，其它形态必须藏起来，否则会多出一颗不动的点。
+  assert.match(sheet, /\.pgc-loader:not\(\[data-pgc-shape="orbit"\]\) \.pgc-dot:nth-child\(4\) \{ display: none; \}/,
+    '非绕圈形态藏起第四颗');
+});
+
+test('设置面板里有「状态标记」两个选项和一句说明，动效开关写得明白', () => {
+  const view = render({
+    partial: { turn: 2, step: 0, blocks: [{ kind: 'reasoning', text: '看看配置' }] },
+    runningCalls: [],
+    nodes: [],
+  });
+  const shown = text(view);
+  assert.match(shown, /状态标记/, '要有这一行');
+  assert.match(shown, /经典三点/, '选项一');
+  assert.match(shown, /Claude 三态/, '选项二');
+  assert.match(shown, /弹跳 \/ 斜线 \/ 绕圈轮着放/, '说明要讲清三种形态怎么轮');
+  assert.match(shown, /每 6 秒换一种/, '轮换间隔要写出来');
+});
+
 test('一条字幕只留一个东西在动：俏皮词在场时，右边那圈弧线让位', () => {
   const busy = {
     partial: { turn: 2, step: 0, blocks: [{ kind: 'reasoning', text: '我先读取配置文件 package.json' }] },
@@ -875,8 +940,9 @@ test('状态标记是三点装载器，装在 .pgc-loader 里，不靠文字徽�
     (node.children || []).forEach((child) => collect(child, false));
   };
   collect(loaders[0], true);
-  assert.deepEqual(collected.sort(), ['pgc-dot', 'pgc-dot', 'pgc-dot'],
-    '槽里就是三颗点，不再有第二条结构');
+  assert.equal(typeof loaders[0].props['data-pgc-shape'], 'string', '形态名挂在 data-pgc-shape 上，由 CSS 分配动画');
+  assert.deepEqual(collected.sort(), ['pgc-dot', 'pgc-dot', 'pgc-dot', 'pgc-dot'],
+    '四颗点常驻：弹跳/斜线用前三颗，绕圈用四颗（多的那颗由 CSS 藏起来）');
 });
 
 test('工具参数 → 只显示文件名 / 搜索词，不显示整段 JSON', () => {

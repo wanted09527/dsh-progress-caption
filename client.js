@@ -61,6 +61,12 @@ window.__ModuleLoader__.load({
     const SETTLE_STEPS = 3;
     /** 动画档位：calm = 只有左侧标记慢慢走（默认，最不打扰）；sweep = 文字扫光；off = 全静止。 */
     const ANIMS = ['calm', 'sweep', 'off'];
+    /** 状态标记的形态来源：plain = 原来的三颗点；claude = 照搬 Claude 的三种（弹跳 / 斜线 / 绕圈）轮着放。 */
+    const MOTIONS = ['plain', 'claude'];
+    /** Claude 那三种形态，顺序和 dsh-claude-style 里一样：bounce → line → orbit。 */
+    const CLAUDE_SHAPES = ['bounce', 'line', 'orbit'];
+    /** 每种形态停留多久再换下一种（Claude 那边是随多个任务轮换的，这里固定成 6 秒一换）。 */
+    const SHAPE_MS = 6000;
     /** 两步之间 partial 会短暂为空；这段时间（毫秒）内仍算「这一轮还在跑」，字幕不许收。 */
     const TURN_GAP_MS = 20000;
     /** 回合小结挂在 turnTail，排序避开官方与其他插件。 */
@@ -342,6 +348,10 @@ window.__ModuleLoader__.load({
         animCalm: '安静',
         animSweep: '扫光',
         animOff: '全静止',
+        motion: '状态标记',
+        motionPlain: '经典三点',
+        motionClaude: 'Claude 三态',
+        motionHint: 'Claude 三态＝弹跳 / 斜线 / 绕圈轮着放，每 6 秒换一种。',
         colorAccent: '字幕条颜色',
         colorOk: '跑成功时',
         colorBad: '跑失败时',
@@ -474,6 +484,10 @@ window.__ModuleLoader__.load({
         animCalm: 'Calm',
         animSweep: 'Shimmer',
         animOff: 'Still',
+        motion: 'Status mark',
+        motionPlain: 'Classic dots',
+        motionClaude: 'Claude trio',
+        motionHint: 'Claude trio = bounce / line / orbit, one after another, 6s each.',
         colorAccent: 'Strip',
         colorOk: 'When it works',
         colorBad: 'When it fails',
@@ -657,7 +671,8 @@ window.__ModuleLoader__.load({
 
     const SETTINGS_KEY = 'dsh-progress-caption:settings';
     const DEFAULT_SETTINGS = {
-      size: 'm', subLine: false, anim: 'calm', words: true, factsOnly: false,
+      size: 'm', subLine: false, anim: 'calm', motion: 'plain',
+      words: true, factsOnly: false,
       accent: 'theme', okColor: 'theme', badColor: 'theme', flavorStyle: 'tint',
     };
     const SIZES = ['s', 'm', 'l'];
@@ -717,6 +732,7 @@ window.__ModuleLoader__.load({
           ? Number(source.lines) >= 2
           : Boolean(source.subLine),
         anim: pick(source.anim, ANIMS, DEFAULT_SETTINGS.anim),
+        motion: pick(source.motion, MOTIONS, DEFAULT_SETTINGS.motion),
         words: source.words === undefined ? DEFAULT_SETTINGS.words : Boolean(source.words),
         factsOnly: source.factsOnly === undefined ? DEFAULT_SETTINGS.factsOnly : Boolean(source.factsOnly),
         accent: pickFrom(ACCENTS, source.accent, DEFAULT_SETTINGS.accent),
@@ -1530,6 +1546,13 @@ window.__ModuleLoader__.load({
       if (shown) paintedRef.current = shown;
       const painted = showFull ? shown : paintedRef.current;
 
+      // Claude 三态：每 SHAPE_MS 换一种（弹跳 → 斜线 → 绕圈 → 回到弹跳）。
+      // 只在「选了 Claude 三态 + 动画没关 + 确实有内容」时才计时：
+      // 收成齿轮或选了全静止档就没有人在看，让计时器空转只是白耗电。
+      const shapeTick = useTick(SHAPE_MS,
+        settings.motion === 'claude' && settings.anim !== 'off' && showFull);
+      const claudeShape = CLAUDE_SHAPES[shapeTick % CLAUDE_SHAPES.length];
+
       // 步骤号整轮常驻：两步之间 partial 会短暂为空，那一刻 view 的 step 是 null，
       // 以前就照着 null 把「第 N 步」整块摘掉，下一步再挂回来——看着就是标题在闪。
       // 现在记住最后一个非空步号，空档时沿用；只有跨到新的一轮才清空。
@@ -1642,6 +1665,11 @@ window.__ModuleLoader__.load({
               { value: 'sweep', label: 'animSweep' },
               { value: 'off', label: 'animOff' },
             ], (value) => update({ anim: value }))),
+            settingRow(t, 'motion', seg('motion', settings.motion, [
+              { value: 'plain', label: 'motionPlain' },
+              { value: 'claude', label: 'motionClaude' },
+            ], (value) => update({ motion: value }))),
+            h('p', { className: 'pgc-sheet-hint' }, t('motionHint')),
             h('span', { className: 'pgc-group' }, t('groupColor')),
             settingRow(t, 'colorAccent', swatches('accent', settings.accent, ACCENTS, (value) => update({ accent: value }))),
             settingRow(t, 'colorOk', seg('okColor', settings.okColor, [
@@ -1710,11 +1738,18 @@ window.__ModuleLoader__.load({
               pinnedStep !== null
                 ? h('span', { className: 'pgc-step' }, fmt(t('step'), { n: pinnedStep }))
                 : null,
-              // 状态标记：一组三点循环（和右侧那个弧线是同一套动作语言）。
-              // 之前这里试过「条 / 圆环 / 立体方块」三种形态，观感没做出来，已整段删掉。
-              // 三个点装在固定宽度的 .pgc-loader 里，靠负 animation-delay 错开相位，
-              // 所以点怎么跳都不会推动右边的主文案。
-              h('span', { className: 'pgc-loader', 'aria-hidden': true },
+              // 状态标记：容器定宽 18×14，里面的点怎么动都不会推动右边的主文案。
+              // 两种来源：
+              //   plain  = 一直用的三颗点排队弹跳（默认，克制）；
+              //   claude = 照搬 Claude 的三种形态轮着放：弹跳 3 点 / 斜线 3 点 / 绕圈 4 点。
+              // 形态名放在 data-pgc-shape 上，由 CSS 属性选择器分配动画，DOM 结构只需一套。
+              h('span', {
+                className: 'pgc-loader',
+                'data-pgc-shape': settings.motion === 'claude' ? claudeShape : 'plain',
+                'aria-hidden': true,
+              },
+                // 四颗常驻：弹跳和斜线只用前三颗（第四颗由 CSS 藏起来），绕圈需要四颗。
+                h('span', { className: 'pgc-dot' }),
                 h('span', { className: 'pgc-dot' }),
                 h('span', { className: 'pgc-dot' }),
                 h('span', { className: 'pgc-dot' })),
@@ -1932,27 +1967,89 @@ window.__ModuleLoader__.load({
 }
 .pgc-dot:nth-child(2) { left: 7px; }
 .pgc-dot:nth-child(3) { left: 14px; }
+/* 第四颗只给「绕圈」用；弹跳和斜线都是三颗，多的那颗直接不占位。 */
+.pgc-loader:not([data-pgc-shape="orbit"]) .pgc-dot:nth-child(4) { display: none; }
+
+/* ── 经典三点：一份动画 + 三条负延迟 ─────────────────────────────────────── */
 /* 安静 / 扫光两档都在跳，只是周期不同；扫光档跟文字的光带对上（.5s）。 */
-.pgc-anim-calm .pgc-dot,
-.pgc-anim-sweep .pgc-dot {
+.pgc-anim-calm .pgc-loader[data-pgc-shape="plain"] .pgc-dot,
+.pgc-anim-sweep .pgc-loader[data-pgc-shape="plain"] .pgc-dot {
   animation: pgc-dot-bounce var(--pgc-dot-period) ease infinite alternate;
 }
-.pgc-anim-calm .pgc-dot:nth-child(1),
-.pgc-anim-sweep .pgc-dot:nth-child(1) { animation-delay: calc(-1 * var(--pgc-dot-period)); }
-.pgc-anim-calm .pgc-dot:nth-child(2),
-.pgc-anim-sweep .pgc-dot:nth-child(2) { animation-delay: calc(-3 * var(--pgc-dot-period) / 5); }
-.pgc-anim-calm .pgc-dot:nth-child(3),
-.pgc-anim-sweep .pgc-dot:nth-child(3) { animation-delay: calc(-2 * var(--pgc-dot-period) / 5); }
-.pgc-anim-sweep .pgc-loader { --pgc-dot-period: var(--pgc-hop-cycle); }
+.pgc-anim-calm .pgc-loader[data-pgc-shape="plain"] .pgc-dot:nth-child(1),
+.pgc-anim-sweep .pgc-loader[data-pgc-shape="plain"] .pgc-dot:nth-child(1) { animation-delay: calc(-1 * var(--pgc-dot-period)); }
+.pgc-anim-calm .pgc-loader[data-pgc-shape="plain"] .pgc-dot:nth-child(2),
+.pgc-anim-sweep .pgc-loader[data-pgc-shape="plain"] .pgc-dot:nth-child(2) { animation-delay: calc(-3 * var(--pgc-dot-period) / 5); }
+.pgc-anim-calm .pgc-loader[data-pgc-shape="plain"] .pgc-dot:nth-child(3),
+.pgc-anim-sweep .pgc-loader[data-pgc-shape="plain"] .pgc-dot:nth-child(3) { animation-delay: calc(-2 * var(--pgc-dot-period) / 5); }
+.pgc-anim-sweep .pgc-loader[data-pgc-shape="plain"] { --pgc-dot-period: var(--pgc-hop-cycle); }
+
+/* ── Claude 三态 ──────────────────────────────────────────────────────────
+   参数照搬 node_modules/dsh-claude-style/lib/client.js：
+   行进距离 8px、弹跳周期 .5s、斜线 1.25s（谐波缓动）、绕圈 2.4s（匀速）。
+   三态由 data-pgc-shape 切换，同一份 DOM，不改结构、不重排。 */
+.pgc-loader { --pgc-travel: 8px; --pgc-bounce-period: .5s; --pgc-line-period: 1.25s; --pgc-orbit-period: 2.4s; }
+
+/* ① 弹跳：和经典三点同一组关键帧，只是周期跟 Claude 对齐（.5s）。 */
+.pgc-anim-calm .pgc-loader[data-pgc-shape="bounce"] .pgc-dot,
+.pgc-anim-sweep .pgc-loader[data-pgc-shape="bounce"] .pgc-dot {
+  animation: pgc-dot-bounce var(--pgc-bounce-period) ease infinite alternate;
+}
+.pgc-anim-calm .pgc-loader[data-pgc-shape="bounce"] .pgc-dot:nth-child(1),
+.pgc-anim-sweep .pgc-loader[data-pgc-shape="bounce"] .pgc-dot:nth-child(1) { animation-delay: calc(-1 * var(--pgc-bounce-period)); }
+.pgc-anim-calm .pgc-loader[data-pgc-shape="bounce"] .pgc-dot:nth-child(2),
+.pgc-anim-sweep .pgc-loader[data-pgc-shape="bounce"] .pgc-dot:nth-child(2) { animation-delay: calc(-3 * var(--pgc-bounce-period) / 5); }
+.pgc-anim-calm .pgc-loader[data-pgc-shape="bounce"] .pgc-dot:nth-child(3),
+.pgc-anim-sweep .pgc-loader[data-pgc-shape="bounce"] .pgc-dot:nth-child(3) { animation-delay: calc(-2 * var(--pgc-bounce-period) / 5); }
+
+/* ② 斜线：三颗点沿一条 30° 斜线来回，中途缩小到 .55 让「远端」显得更远。
+   每颗的圆心与方向由 --pgc-centre / --pgc-line-x / --pgc-line-y 决定，
+   终点再由它们算出，所以关键帧只用一条。 */
+.pgc-loader[data-pgc-shape="line"] .pgc-dot {
+  --pgc-centre: 0px; --pgc-line-x: 0; --pgc-line-y: -1;
+  --pgc-end-x: calc(var(--pgc-centre) + var(--pgc-line-x) * var(--pgc-travel));
+  --pgc-end-y: calc((var(--pgc-line-y) - 1) * var(--pgc-travel));
+}
+.pgc-loader[data-pgc-shape="line"] .pgc-dot:nth-child(1) { --pgc-centre: 7px; }
+.pgc-loader[data-pgc-shape="line"] .pgc-dot:nth-child(2) { --pgc-line-x: -.866; --pgc-line-y: -.5; }
+.pgc-loader[data-pgc-shape="line"] .pgc-dot:nth-child(3) { --pgc-centre: -7px; --pgc-line-x: -.866; --pgc-line-y: .5; }
+.pgc-anim-calm .pgc-loader[data-pgc-shape="line"] .pgc-dot,
+.pgc-anim-sweep .pgc-loader[data-pgc-shape="line"] .pgc-dot {
+  animation: pgc-dot-line var(--pgc-line-period) cubic-bezier(.37, 0, .63, 1) infinite;
+  animation-delay: calc(-1 * var(--pgc-line-period) / 4);
+}
+.pgc-anim-calm .pgc-loader[data-pgc-shape="line"] .pgc-dot:nth-child(2),
+.pgc-anim-sweep .pgc-loader[data-pgc-shape="line"] .pgc-dot:nth-child(2) { animation-delay: calc(-7 * var(--pgc-line-period) / 12); }
+.pgc-anim-calm .pgc-loader[data-pgc-shape="line"] .pgc-dot:nth-child(3),
+.pgc-anim-sweep .pgc-loader[data-pgc-shape="line"] .pgc-dot:nth-child(3) { animation-delay: calc(-11 * var(--pgc-line-period) / 12); }
+
+/* ③ 绕圈：四颗点围着一个椭圆转，各自相差 1/4 圈，所以看起来像一条连续的弧。
+   点位以容器中心为原点，所以先把每颗点挪到中心（-2px 是它自身半径）。 */
+.pgc-loader[data-pgc-shape="orbit"] .pgc-dot {
+  top: 50%; bottom: auto; left: 50%;
+  margin: -2px 0 0 -2px;
+}
+.pgc-anim-calm .pgc-loader[data-pgc-shape="orbit"] .pgc-dot,
+.pgc-anim-sweep .pgc-loader[data-pgc-shape="orbit"] .pgc-dot {
+  animation: pgc-dot-orbit-1 var(--pgc-orbit-period) linear infinite;
+}
+.pgc-anim-calm .pgc-loader[data-pgc-shape="orbit"] .pgc-dot:nth-child(2),
+.pgc-anim-sweep .pgc-loader[data-pgc-shape="orbit"] .pgc-dot:nth-child(2) { animation-name: pgc-dot-orbit-2; }
+.pgc-anim-calm .pgc-loader[data-pgc-shape="orbit"] .pgc-dot:nth-child(3),
+.pgc-anim-sweep .pgc-loader[data-pgc-shape="orbit"] .pgc-dot:nth-child(3) { animation-name: pgc-dot-orbit-4; }
+.pgc-anim-calm .pgc-loader[data-pgc-shape="orbit"] .pgc-dot:nth-child(4),
+.pgc-anim-sweep .pgc-loader[data-pgc-shape="orbit"] .pgc-dot:nth-child(4) { animation-name: pgc-dot-orbit-3; }
+
 /* 成功 / 失败态：只换颜色，不把标记冻住。
    原来这里写 animation: none —— 结果是「动作已经跑完、但这一轮还没收」的那几秒里，
    左边定住了、右边俏皮词还在滚，一边静一边动，看着像坏了。 */
 .pgc-strip--ok .pgc-dot { background: var(--pgc-ok); }
 .pgc-strip--error .pgc-dot { background: var(--pgc-bad); }
-/* 全静止档：三颗点停在原地，只留中间那颗 —— 排一排不动的点在视觉上像「加载卡住」。 */
+/* 全静止档：点停在原地，只留一颗 —— 排一排不动的点在视觉上像「加载卡住」。 */
 .pgc-anim-off .pgc-dot { animation: none; transform: none; opacity: .55; }
 .pgc-anim-off .pgc-dot:nth-child(2),
-.pgc-anim-off .pgc-dot:nth-child(3) { display: none; }
+.pgc-anim-off .pgc-dot:nth-child(3),
+.pgc-anim-off .pgc-dot:nth-child(4) { display: none; }
 /* 主文案：一行放不下就省略号，别缩成俩字。
    不再按「行数 2/3」加 line-clamp——主文案是拼出来的整句（十几个字），
    开 2/3 行几乎不会真的折行，视觉上没差别，所以那个设置项已经删了。 */
@@ -2263,6 +2360,51 @@ window.__ModuleLoader__.load({
   40% { transform: translateY(-3.2px) scale(1, 1); animation-timing-function: linear; }
   60% { transform: translateY(-4.8px) scale(1, 1); }
   100% { transform: translateY(-8px) scale(1, 1); }
+}
+/* 斜线（Claude 的 line）：三颗点沿斜线来回一趟。
+   0% 在三颗点连成的线上「最外端」，50% 滑到线的另一端，100% 回到原处；
+   25% / 75% 时缩到 .55 —— 缩小的那一下正好在轨迹中段，
+   读起来像「远处的那颗退了半步」，比匀速平移更有一来一回的感觉。
+   用 translate / scale 两个独立属性，互不覆盖；只碰合成层。 */
+@keyframes pgc-dot-line {
+  0%, 100% {
+    translate: calc(2 * var(--pgc-centre) - var(--pgc-end-x)) calc(-2 * var(--pgc-travel) - var(--pgc-end-y));
+    scale: 1;
+  }
+  25%, 75% { scale: .55; }
+  50% { translate: var(--pgc-end-x) var(--pgc-end-y); scale: 1; }
+}
+/* 绕圈（Claude 的 orbit）：四颗点绕同一个椭圆跑，各自的相位差 1/4 圈。
+   点位是逐段采样出来的（不是 rotate 转出来的），因为椭圆不是正圆，
+   用 rotate 会把点甩出 18×14 的容器；采样出来的坐标全部落在框内。
+   0% 在左上，走完一圈回到左上，接缝处速度一致，不会「咯噔」。 */
+@keyframes pgc-dot-orbit-1 {
+  0% { translate: -4.75px -5.8px; }
+  12.5% { translate: 2.9px 5.58px; }
+  25%, 50% { translate: 4.75px 5.8px; }
+  62.5% { translate: -2.9px -5.58px; }
+  100% { translate: -4.75px -5.8px; }
+}
+@keyframes pgc-dot-orbit-2 {
+  0%, 25% { translate: 4.75px -5.8px; }
+  37.5% { translate: -2.9px 5.58px; }
+  50%, 75% { translate: -4.75px 5.8px; }
+  87.5% { translate: 2.9px -5.58px; }
+  100% { translate: 4.75px -5.8px; }
+}
+@keyframes pgc-dot-orbit-3 {
+  0%, 25% { translate: -4.75px 5.8px; }
+  37.5% { translate: 2.9px -5.58px; }
+  50%, 75% { translate: 4.75px -5.8px; }
+  87.5% { translate: -2.9px 5.58px; }
+  100% { translate: -4.75px 5.8px; }
+}
+@keyframes pgc-dot-orbit-4 {
+  0% { translate: 4.75px 5.8px; }
+  12.5% { translate: -2.9px -5.58px; }
+  25%, 50% { translate: -4.75px -5.8px; }
+  62.5% { translate: 2.9px -5.58px; }
+  100% { translate: 4.75px 5.8px; }
 }
 /* 扫光关键帧：整条光带从左边界外一路走到右边界外，全程匀速横穿。
    宽度就是整框（100%），所以 -100% 时完全在左侧看不见，100% 时完全越过右侧，

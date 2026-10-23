@@ -41,6 +41,13 @@ const sheet = (open) => `
                 <button type="button" class="pgc-seg-btn" data-on="false">全静止</button>
               </span>
             </label>
+            <label class="pgc-set-row"><span class="pgc-set-name">状态标记</span>
+              <span class="pgc-seg" role="group">
+                <button type="button" class="pgc-seg-btn" data-on="true">经典三点</button>
+                <button type="button" class="pgc-seg-btn" data-on="false">Claude 三态</button>
+              </span>
+            </label>
+            <p class="pgc-sheet-hint">Claude 三态＝弹跳 / 斜线 / 绕圈轮着放，每 6 秒换一种。</p>
             <span class="pgc-group">颜色</span>
             <label class="pgc-set-row"><span class="pgc-set-name">字幕条颜色</span>
             <span class="pgc-swatches" role="group">
@@ -101,7 +108,7 @@ const sheet = (open) => `
 const flavor = (word) => `<span class="pgc-flavor"><span class="pgc-flavor-track pgc-flavor-still"><span class="pgc-flavor-line" aria-hidden="true">${word}</span><span class="pgc-flavor-line">${word}</span></span></span>`;
 
 // 三点装载器 —— 和 client.js 里的 JSX 一模一样。
-const LOADER = `<span class="pgc-loader" aria-hidden="true"><span class="pgc-dot"></span><span class="pgc-dot"></span><span class="pgc-dot"></span></span>`;
+const LOADER = `<span class="pgc-loader" data-pgc-shape="bounce" aria-hidden="true"><span class="pgc-dot"></span><span class="pgc-dot"></span><span class="pgc-dot"></span><span class="pgc-dot"></span></span>`;
 
 const strip = (state, body, extra = '', anim = 'calm') => `
       <div class="pgc-strip pgc-strip--${state} pgc-size-m pgc-anim-${anim} ${body.includes('pgc-flavor') ? ' pgc-strip--hasflavor' : ''}" data-plugin="dsh-progress-caption" title="字幕由规则推断，不代表模型真实意图">
