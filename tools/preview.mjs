@@ -75,7 +75,7 @@ const sheet = (open) => `
             </label>
             <label class="pgc-set-row"><span class="pgc-set-name">俏皮词样子</span>
               <span class="pgc-seg" role="group">
-                <button type="button" class="pgc-seg-btn" data-on="true">淡色底</button>
+                <button type="button" class="pgc-seg-btn" data-on="true">渐隐</button>
                 <button type="button" class="pgc-seg-btn" data-on="false">实心</button>
                 <button type="button" class="pgc-seg-btn" data-on="false">素色</button>
               </span>
@@ -110,8 +110,8 @@ const flavor = (word) => `<span class="pgc-flavor"><span class="pgc-flavor-track
 // 三点装载器 —— 和 client.js 里的 JSX 一模一样。
 const LOADER = `<span class="pgc-loader" data-pgc-shape="bounce" aria-hidden="true"><span class="pgc-dot"></span><span class="pgc-dot"></span><span class="pgc-dot"></span><span class="pgc-dot"></span></span>`;
 
-const strip = (state, body, extra = '', anim = 'calm') => `
-      <div class="pgc-strip pgc-strip--${state} pgc-size-m pgc-anim-${anim} ${body.includes('pgc-flavor') ? ' pgc-strip--hasflavor' : ''}" data-plugin="dsh-progress-caption" title="字幕由规则推断，不代表模型真实意图">
+const strip = (state, body, extra = '', anim = 'calm', flavorStyle = 'tint') => `
+      <div class="pgc-strip pgc-strip--${state} pgc-size-m pgc-anim-${anim} pgc-flavor-${flavorStyle} ${body.includes('pgc-flavor') ? ' pgc-strip--hasflavor' : ''}" data-plugin="dsh-progress-caption" title="字幕由规则推断，不代表模型真实意图">
         <span class="pgc-sweep" aria-hidden="true"></span>
         <span class="pgc-band">
           <span class="pgc-live" role="status" aria-live="polite">${body}</span>
@@ -164,7 +164,7 @@ ${strip('thinking', `
           ${LOADER}
           <span class="pgc-text">
             <span class="pgc-label">看看配置里怎么写的</span>
-            <span class="pgc-sub">先看 package.json 的入口，再决定改哪里</span>
+            <span class="pgc-sub-wrap pgc-sub-wrap--on"><span class="pgc-sub">先看 package.json 的入口，再决定改哪里</span></span>
           </span>
           <span class="pgc-slot" aria-hidden="true"><span class="pgc-arc"><span></span><span></span><span></span></span></span>
           ${flavor('盘算中')}`)}
@@ -173,7 +173,7 @@ ${strip('thinking', `
           ${LOADER}
           <span class="pgc-text">
             <span class="pgc-label">扫光档：光带横扫整条字幕</span>
-            <span class="pgc-sub">第二行也跟着一起扫，不是只扫第一行</span>
+            <span class="pgc-sub-wrap pgc-sub-wrap--on"><span class="pgc-sub">第二行也跟着一起扫，不是只扫第一行</span></span>
           </span>
           <span class="pgc-slot" aria-hidden="true"><span class="pgc-arc"><span></span><span></span><span></span></span></span>
           ${flavor('琢磨中')}`, '', 'sweep')}
@@ -182,9 +182,19 @@ ${strip('thinking', `
           ${LOADER}
           <span class="pgc-text"><span class="pgc-label">npm test 跑完了 · 1.2s</span></span>
           ${flavor('缓口气')}`)}
+${strip('thinking', `
+          <span class="pgc-step">第 9 步</span>
+          ${LOADER}
+          <span class="pgc-label">俏皮词样子：实心（一块底色 + 白字）</span>
+          ${flavor('琢磨中')}`, '', 'calm', 'solid')}
+${strip('thinking', `
+          <span class="pgc-step">第 10 步</span>
+          ${LOADER}
+          <span class="pgc-label">俏皮词样子：素色（纯文字，连渐隐也关掉）</span>
+          ${flavor('琢磨中')}`, '', 'calm', 'plain')}
       <div class="pgc-summary"><span class="pgc-summary-text">本回合 · 3 次工具 · 2 成 1 败 · 用时 12.4s</span></div>
     </div>
-    <p class="doc">主文案是一整句（动作 + 具体对象），左侧是三颗接力跳的点（进行中），右侧胶囊是俏皮词。最下面一条是空闲齿轮 + 展开的设置面板。</p>
+    <p class="doc">主文案是一整句（动作 + 具体对象），左侧是三颗接力跳的点（进行中），右侧是俏皮词（两端渐隐的滚槽，没有封闭边框）。最下面一条是空闲齿轮 + 展开的设置面板。</p>
   </section>`;
 
 const html = `<!doctype html>

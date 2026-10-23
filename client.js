@@ -357,7 +357,7 @@ window.__ModuleLoader__.load({
         colorBad: '跑失败时',
         colorFlavor: '俏皮词样子',
         toneTheme: '跟随主题',
-        toneTint: '淡色底',
+        toneTint: '渐隐',
         toneSolid: '实心',
         tonePlain: '素色',
         swOcean: '海蓝',
@@ -493,7 +493,7 @@ window.__ModuleLoader__.load({
         colorBad: 'When it fails',
         colorFlavor: 'Fun word look',
         toneTheme: 'Theme',
-        toneTint: 'Tinted',
+        toneTint: 'Faded',
         toneSolid: 'Solid',
         tonePlain: 'Plain',
         swOcean: 'Ocean',
@@ -1193,6 +1193,12 @@ window.__ModuleLoader__.load({
       // 宿主发出来的 step 本来就是 1 起（用真实会话日志核过：第一个 step 就是 1），
       // 这里绝对不能再 +1，否则「第 1 步」会被显示成「第 2 步」。
       const step = partial && typeof partial.step === 'number' ? partial.step : null;
+      const blocks = partial && Array.isArray(partial.blocks) ? partial.blocks : EMPTY;
+      // 副行是「整轮都在」的东西，不是只有 thinking 那一瞬间才有。
+      // 以前只有 thinking 分支带 sub：工具一起来（state 变 running）这行就被摘掉，
+      // 工具跑完回到 thinking 又挂回来——一轮里能来回好几次，整条框跟着一跳一跳。
+      // 现在每个「这一轮还没结束」的分支都带上同一句思考原话，状态怎么翻都不动它。
+      const sub = pickThought(lastReasoningText(blocks));
 
       // 1) 有工具在跑。
       if (calls.length > 0) {
@@ -1209,13 +1215,14 @@ window.__ModuleLoader__.load({
           target: toolTarget(call),
           ruleId: null,
           phase: null,
+          // 工具在跑，但这一轮还没结束：副行照旧挂着，不因为 state 从 thinking 翻成 running 就消失。
+          sub,
           kind: null,
           code: null,
           rawLine: '',
         };
       }
 
-      const blocks = partial && Array.isArray(partial.blocks) ? partial.blocks : EMPTY;
       const tail = blocks.length > 0 ? blocks[blocks.length - 1] : null;
       const tailKind = tail ? tail.kind : null;
 
@@ -1231,6 +1238,7 @@ window.__ModuleLoader__.load({
           target: '',
           ruleId: null,
           phase: null,
+          sub,
           kind: null,
           code: null,
           rawLine: '',
@@ -1293,7 +1301,7 @@ window.__ModuleLoader__.load({
         target: '',
         ruleId: rule ? rule.id : null,
         // 副行：从这段思考里挑一句最有信息量的（不是第一句——第一句几乎都是过场话）。
-        sub: pickThought(lastReasoningText(blocks)),
+        sub,
         phase: !rule && phase ? phase.text : null,
         kind: null,
         code: null,
@@ -1546,6 +1554,21 @@ window.__ModuleLoader__.load({
       if (shown) paintedRef.current = shown;
       const painted = showFull ? shown : paintedRef.current;
 
+      // 副行（「思考原话」）整轮常驻：以前它只跟着 thinking 这一种 state 走，
+      // 工具一跑（state 翻成 running）就被摘掉，工具跑完回到 thinking 又挂回来——
+      // 一轮里能来回好几次，每次整条框都跟着长高 / 缩回 13px。
+      // 现在记住这一轮最后一句非空的思考原话，中间状态怎么翻都继续显示；
+      // 只有换到新的一轮才清空（收成齿轮时由 showFull 一并收掉）。
+      const subRef = React.useRef({ turn: null, text: '' });
+      const paintedTurn = painted && typeof painted.turn === 'number' ? painted.turn : null;
+      if (paintedTurn !== null && subRef.current.turn !== paintedTurn) {
+        subRef.current = { turn: paintedTurn, text: '' };
+      }
+      if (painted && painted.sub) subRef.current.text = painted.sub;
+      const subText = showFull && settings.subLine
+        ? (painted && painted.sub ? painted.sub : subRef.current.text)
+        : '';
+
       // Claude 三态：每 SHAPE_MS 换一种（弹跳 → 斜线 → 绕圈 → 回到弹跳）。
       // 只在「选了 Claude 三态 + 动画没关 + 确实有内容」时才计时：
       // 收成齿轮或选了全静止档就没有人在看，让计时器空转只是白耗电。
@@ -1757,10 +1780,13 @@ window.__ModuleLoader__.load({
               // 稳定过（最快 520ms / 快思考 800ms 才换一次），比 160ms 的动画长，不会连成闪烁。
               h('span', { className: 'pgc-text' },
                 h('span', { className: 'pgc-label', key: label }, label),
-                // 「思考原话」开关打开后，才多给一行模型自己的思考首句当副行。
-                settings.subLine && painted.state === 'thinking' && painted.sub
-                  ? h('span', { className: 'pgc-sub' }, painted.sub)
-                  : null),
+                // 「思考原话」那一行。外面这层 .pgc-sub-wrap 是「高度闸门」：
+                // 副行有没有内容都常驻，靠 max-height 0 → 1.6em 过渡来开关。
+                // 以前是直接挂/摘 .pgc-sub，盒子高度会在一帧里多出 13px，
+                // 整条框就突兀地跳高、又突然缩回（.pgc-band 那条 max-height 过渡一次也没生效过，
+                // 因为它的 max-height 恒为 7em，真正变的是里面的内容高度）。
+                h('span', { className: 'pgc-sub-wrap' + (subText ? ' pgc-sub-wrap--on' : '') },
+                  h('span', { className: 'pgc-sub' }, subText))),
               // 俏皮词在场时，不再重复挂「进行中」——两个都在就互相挤，主文案被压成两三个字。
               // 进行中由左侧小圆点表达；「成功 / 失败」是结论，任何时候都留着。
               status && (!suffix || painted.state === 'ok' || painted.state === 'error')
@@ -2054,7 +2080,15 @@ window.__ModuleLoader__.load({
    不再按「行数 2/3」加 line-clamp——主文案是拼出来的整句（十几个字），
    开 2/3 行几乎不会真的折行，视觉上没差别，所以那个设置项已经删了。 */
 .pgc-text { display: flex; flex-direction: column; justify-content: center; flex: 1 1 auto; min-width: 0; }
-.pgc-sub { flex: 0 0 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: .92em; line-height: 1.5; color: var(--dsw-alias-label-secondary, inherit); opacity: .78; }
+/* 副行的「高度闸门」。这层壳常驻在树上，展开/收起只改 max-height 与 opacity，
+   所以副行出现、消失都不会在一帧里把盒子的内容高度顶高 / 抽走（那正是「整条框突然
+   跳高又突然缩回」的来源）。壳自己不占位：收起时 max-height: 0 + overflow: hidden。 */
+.pgc-sub-wrap { flex: 0 0 auto; min-width: 0; max-height: 0; opacity: 0; overflow: hidden;
+  transition: max-height .18s cubic-bezier(.23, 1, .32, 1), opacity .14s ease; }
+.pgc-sub-wrap--on { max-height: 1.6em; opacity: .78; }
+/* 副行本体：display: block 是必须的 —— 它现在被包在 .pgc-sub-wrap 里，不再是
+   .pgc-text 的直接 flex 子项，若还是 inline 就吃不到 overflow/text-overflow 的省略号。 */
+.pgc-sub { display: block; flex: 0 0 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: .92em; line-height: 1.5; color: var(--dsw-alias-label-secondary, inherit); }
 .pgc-label { position: relative; flex: 0 0 auto; min-width: 0; overflow: hidden; display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 1; overflow-wrap: anywhere; }
 /* 文案换了才重播的淡入上浮：只动 opacity + translateY（合成层），不改宽高、不重排。
    160ms 是「看得见但来不及拖沓」的量级；换文案的间隔由 holdMs 兜住，不会连成闪烁。
@@ -2114,8 +2148,15 @@ window.__ModuleLoader__.load({
 /* 俏皮词：不用斜体（中文被强行倾斜很难看），固定占最右一格。
    宽度写死 6.6em：词最短 3 字最长 5 字，写死之后换词时右边这块纹丝不动，
    左边的状态文字就不会被一会儿推左一会儿推右（这也是「闪」的一个来源）。
-   换词时外壳（底色 / 圆角 / 宽度）一律不动，只有里面两行字在滚：
-   这个框就是那条「滚槽」，overflow: hidden 把滚出去的那半句裁掉。 */
+   换词时外壳（宽度 / 高度 / 位置）一律不动，只有里面两行字在滚：
+   这个框就是那条「滚槽」，overflow: hidden 把滚出去的那半句裁掉。
+
+   默认这一档不再画「一圈」：没有底色、没有描边、没有圆角矩形。
+   一圈封闭的框把词关在里面，怎么看都像个按钮，而且小字 + 细描边在深色主题下
+   容易糊成一条灰边。改成两端渐隐的滚槽之后，词是从左右两团雾里滚进滚出的，
+   边界不再是一条硬线，「滚」这件事才读得出来。
+   渐隐只能用 mask：想拿 ::before/::after 盖一层背景色做假渐隐，在无底色的
+   滚槽上会把背后的整条胶囊一起盖住，所以这里必须是真·透明遮罩。 */
 .pgc-flavor {
   flex: 0 0 auto; width: 6.6em; max-width: 46%; margin-left: 6px;
   position: relative; display: inline-flex; align-items: center; justify-content: center;
@@ -2123,10 +2164,11 @@ window.__ModuleLoader__.load({
   overflow: hidden; text-overflow: ellipsis; white-space: nowrap; text-align: center;
   font-style: normal; font-weight: 600; font-size: .95em; line-height: 1.6; letter-spacing: .2px;
   color: var(--pgc-accent);
-  background: color-mix(in srgb, var(--pgc-accent) 15%, transparent);
-  border: 1px solid color-mix(in srgb, var(--pgc-accent) 30%, transparent);
-  border-radius: 999px; padding: 0 9px;
-  transition: color .18s ease, background-color .18s ease, border-color .18s ease;
+  padding: 0 9px;
+  /* 两端渐隐：左右各 14% 渐变到全透明，词从雾里滚进、再滚回雾里。 */
+  -webkit-mask-image: linear-gradient(90deg, transparent 0, #000 14%, #000 86%, transparent 100%);
+  mask-image: linear-gradient(90deg, transparent 0, #000 14%, #000 86%, transparent 100%);
+  transition: color .18s ease, background-color .18s ease;
 }
 /* 滚槽里的滚动体：上一句在上、新的一句在下，两行竖直叠着，整体往上滚半格。
    滚动体的高度是滚槽的两倍，所以「滚半格」正好等于「滚一行」——
@@ -2146,25 +2188,28 @@ window.__ModuleLoader__.load({
 }
 /* 刚出现（还没有「上一句」）时不要滚：条本身已经在播入场动画，再滚一次就显得吵。 */
 .pgc-flavor-still { animation: none; }
-/* 俏皮词三种样式：淡色底（默认）/ 实心 / 素色（不要底色，只留字）。 */
-/* 换词动画挂在滚动体上（.pgc-flavor-track 自带 animation），外壳不再挂，
+/* 俏皮词三种样式，三档必须一眼分得开：
+   - tint（默认，无后缀同名规则）：两端渐隐的滚槽，没有底色也没有描边；
+   - solid：想要「一块底」的选它，实心胶囊 + 白字，渐变遮罩必须关掉，
+     否则胶囊两头会被啃成透明，就不是胶囊了；
+   - plain：纯文字，连渐隐也关掉，词走到边上直接顶格。
+   换词动画挂在滚动体上（.pgc-flavor-track 自带 animation），外壳不再挂，
    所以原来「每个词都连胶囊一起重挂载」的闪烁没有了。全静止档由后面的规则统一关掉。 */
-.pgc-flavor-solid .pgc-flavor { color: #fff; background: var(--pgc-accent); border-color: transparent; }
-.pgc-flavor-plain .pgc-flavor { color: var(--pgc-accent); background: transparent; border-color: transparent; opacity: .92; }
-.pgc-strip--ok .pgc-flavor {
-  color: var(--pgc-ok);
-  background: color-mix(in srgb, var(--pgc-ok) 15%, transparent);
-  border-color: color-mix(in srgb, var(--pgc-ok) 30%, transparent);
+.pgc-flavor-solid .pgc-flavor {
+  color: #fff; background: var(--pgc-accent);
+  border-radius: 999px;
+  -webkit-mask-image: none; mask-image: none;
 }
-.pgc-strip--error .pgc-flavor {
-  color: var(--pgc-bad);
-  background: color-mix(in srgb, var(--pgc-bad) 15%, transparent);
-  border-color: color-mix(in srgb, var(--pgc-bad) 30%, transparent);
+.pgc-flavor-plain .pgc-flavor {
+  color: var(--pgc-accent); background: transparent; opacity: .92;
+  -webkit-mask-image: none; mask-image: none;
 }
-.pgc-flavor-solid.pgc-strip--ok .pgc-flavor { color: #fff; background: var(--pgc-ok); border-color: transparent; }
-.pgc-flavor-solid.pgc-strip--error .pgc-flavor { color: #fff; background: var(--pgc-bad); border-color: transparent; }
-.pgc-flavor-plain.pgc-strip--ok .pgc-flavor { background: transparent; border-color: transparent; }
-.pgc-flavor-plain.pgc-strip--error .pgc-flavor { background: transparent; border-color: transparent; }
+/* 成功 / 失败：默认档只换字色，不铺底色、不描边——框都没了，再补一圈颜色就白改了。 */
+.pgc-strip--ok .pgc-flavor { color: var(--pgc-ok); }
+.pgc-strip--error .pgc-flavor { color: var(--pgc-bad); }
+/* 实心档在成功 / 失败时连胶囊底色一起换，白字保持不变。 */
+.pgc-flavor-solid.pgc-strip--ok .pgc-flavor { color: #fff; background: var(--pgc-ok); }
+.pgc-flavor-solid.pgc-strip--error .pgc-flavor { color: #fff; background: var(--pgc-bad); }
 .pgc-chip { flex: 0 0 auto; padding: 0 6px; border: 1px solid color-mix(in srgb, var(--pgc-accent) 38%, transparent); border-radius: 999px; font-size: 11px; color: var(--pgc-accent); }
 .pgc-strip--ok .pgc-chip { color: var(--pgc-ok); border-color: color-mix(in srgb, var(--pgc-ok) 48%, transparent); }
 .pgc-strip--error .pgc-chip { color: var(--pgc-bad); border-color: color-mix(in srgb, var(--pgc-bad) 52%, transparent); }
@@ -2327,6 +2372,10 @@ window.__ModuleLoader__.load({
   /* 系统开了「减少动态效果」时，也不再做位移和缩放，只留颜色的硬切换。 */
   .pgc-band { max-height: 7em; opacity: 1; }
   .pgc-strip--handle .pgc-band { max-height: 0; opacity: 0; margin-block: 0; padding-block: 0; }
+  /* 副行的开合直接到位：上面已经把 transition 全关了，这里把两端状态写死，
+     免得将来有人只改动默认值、忘了降级分支。 */
+  .pgc-sub-wrap { max-height: 0; opacity: 0; }
+  .pgc-sub-wrap--on { max-height: 1.6em; opacity: .78; }
   /* 不转的时候，点靠 keyframes 才亮起来，这里要补回可见度，否则整个标记会消失。 */
   .pgc-arc > span { opacity: .6 !important; }
   /* 同理：三点停住后要回到「看得见」的静止形（靠 keyframes 才有位移，一撤就全落回原位）。 */

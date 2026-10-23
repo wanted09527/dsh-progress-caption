@@ -49,7 +49,7 @@ pre { font: 11px/1.5 monospace; background: #f4f4f4; padding: 8px; }
     ${LOADER}
     <span class="pgc-text">
       <span class="pgc-label">看看配置里怎么写的</span>
-      <span class="pgc-sub">先看 package.json 的入口，再决定改哪里</span>
+      <span class="pgc-sub-wrap pgc-sub-wrap--on"><span class="pgc-sub">先看 package.json 的入口，再决定改哪里</span></span>
     </span>
     <span class="pgc-flavor">小跑中</span>`, '')}
   </div>

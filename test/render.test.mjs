@@ -302,6 +302,54 @@ test('俏皮词占固定宽度，换词不推挤主文案', () => {
   assert.doesNotMatch(flavor[1], /min-width:/, 'min-width 会让宽度跟着词长浮动');
 });
 
+test('默认档的俏皮词不画「一圈」：没有边框、没有底色，只有两端渐隐', () => {
+  const flavor = /\.pgc-flavor \{([\s\S]*?)\}/.exec(sheet);
+  assert.ok(flavor, '要能找到 .pgc-flavor 规则');
+  // 去掉注释再看声明，否则注释里解释「以前有 border」会被误判。
+  const rule = flavor[1].replace(/\/\*[\s\S]*?\*\//g, '');
+  assert.doesNotMatch(rule, /border:\s*1px/, '默认档不许再有一圈描边，词不该被关在框里');
+  assert.doesNotMatch(rule, /border-radius:\s*999px/, '没有边框就不要胶囊圆角了');
+  assert.doesNotMatch(rule, /background:\s*color-mix/, '默认档不留底色，圆角矩形就是它撑出来的');
+  assert.match(rule, /mask-image: linear-gradient\(90deg, transparent 0, #000 14%, #000 86%, transparent 100%\)/,
+    '两端各 14% 渐变到透明：词从雾里滚进滚出，边界不是一条硬线');
+  assert.match(rule, /-webkit-mask-image: linear-gradient/, 'Safari / 旧 WebKit 也要这条');
+  // 滚槽本体该留的还得在。
+  assert.match(rule, /overflow: hidden/, '滚槽还得裁掉滚出去的那半句');
+  assert.match(rule, /height: 1\.6em/, '高度锁死，换词不撑高');
+  assert.match(rule, /padding: 0 9px/, '留点内边距，不然字贴着渐隐区就没了');
+  assert.doesNotMatch(rule, /animation:/, '外壳依然不许挂动画');
+});
+
+test('俏皮词三档真的分得开：实心有一块底，素色连渐隐都关掉', () => {
+  const solid = /\.pgc-flavor-solid \.pgc-flavor \{([\s\S]*?)\}/.exec(sheet);
+  assert.ok(solid, '要有实心档规则');
+  const solidRule = solid[1].replace(/\/\*[\s\S]*?\*\//g, '');
+  assert.match(solidRule, /background: var\(--pgc-accent\)/, '实心档要有一块实底');
+  assert.match(solidRule, /color: #fff/, '实底上要用白字');
+  assert.match(solidRule, /mask-image: none/, '实心胶襄必须关掉渐隐，否则两头会被啃成透明');
+
+  const plain = /\.pgc-flavor-plain \.pgc-flavor \{([\s\S]*?)\}/.exec(sheet);
+  assert.ok(plain, '要有素色档规则');
+  const plainRule = plain[1].replace(/\/\*[\s\S]*?\*\//g, '');
+  assert.match(plainRule, /background: transparent/, '素色不许有底色');
+  assert.match(plainRule, /mask-image: none/, '素色连渐隐也不要，词直接顶格');
+
+  // 成功 / 失败只换字色，不再铺一层底色。
+  const ok = /\.pgc-strip--ok \.pgc-flavor \{([\s\S]*?)\}/.exec(sheet);
+  assert.ok(ok, '要有成功态规则');
+  assert.match(ok[1], /color: var\(--pgc-ok\)/, '成功换字色');
+  assert.doesNotMatch(ok[1], /background:/, '默认档成功也不铺底色');
+  const bad = /\.pgc-strip--error \.pgc-flavor \{([\s\S]*?)\}/.exec(sheet);
+  assert.ok(bad, '要有失败态规则');
+  assert.match(bad[1], /color: var\(--pgc-bad\)/, '失败换字色');
+  assert.doesNotMatch(bad[1], /background:/, '默认档失败也不铺底色');
+
+  // 实心档仍可以整颗换色。
+  const solidOk = /\.pgc-flavor-solid\.pgc-strip--ok \.pgc-flavor \{([\s\S]*?)\}/.exec(sheet);
+  assert.ok(solidOk, '实心档成功要能整颗换色');
+  assert.match(solidOk[1], /background: var\(--pgc-ok\)/, '实心档成功时底色跟着换');
+});
+
 test('一行时不许把俏皮词胶囊切掉一条：靠内边距撑开裁剪框，且必须仍然裁剪', () => {
   const bandRule = /\.pgc-band \{([\s\S]*?)\}/.exec(sheet);
   assert.ok(bandRule, '要能找到 .pgc-band 规则');
@@ -588,7 +636,7 @@ test('设置面板：分成「长什么样 / 颜色 / 说什么」三组，颜�
   assert.match(shown, /跑成功时/);
   assert.match(shown, /跑失败时/);
   // 俏皮词样式三选一
-  assert.match(shown, /淡色底/);
+  assert.match(shown, /渐隐/);
   assert.match(shown, /实心/);
   assert.match(shown, /素色/);
 });
@@ -1386,6 +1434,97 @@ test('副行：打开「思考原话」才摘一句，关着时不占地方', ()
     assert.match(text(render(data)), /读取配置文件/);
     globalThis.localStorage = { getItem: () => JSON.stringify({ lines: 1 }), setItem: () => {} };
     assert.doesNotMatch(text(render(data)), /读取配置文件/);
+  } finally {
+    if (previous === undefined) delete globalThis.localStorage;
+    else globalThis.localStorage = previous;
+  }
+});
+
+test('副行包在「高度闸门」里：开合走过渡，不再让整条框跳高 / 缩回', () => {
+  // 老实现把 .pgc-sub 直接挂在 .pgc-text 下：出现/消失的一瞬间内容高度多 13px / 少 13px，
+  // 整条框跟着一跳（.pgc-band 那条 max-height 过渡恒为 7em，一次都没生效过）。
+  const wrap = /\.pgc-sub-wrap \{([\s\S]*?)\}/.exec(sheet);
+  assert.ok(wrap, '要有 .pgc-sub-wrap 这层壳');
+  const body = wrap[1].replace(/\/\*[\s\S]*?\*\//g, '');
+  assert.match(body, /max-height: 0/, '默认高度为 0：收起时壳不占地方');
+  assert.match(body, /opacity: 0/, '默认透明，跟着高度一起淡出');
+  assert.match(body, /overflow: hidden/, '收起时要把内容裁掉，别溢到外面');
+  assert.match(body, /transition: max-height \.18s/, '高度变化必须走过渡，否则还是瞬间跳');
+  assert.match(body, /opacity \.14s/, '透明度要跟着一起过渡');
+  const on = /\.pgc-sub-wrap--on \{([^}]*)\}/.exec(sheet);
+  assert.ok(on, '要有展开态 .pgc-sub-wrap--on');
+  assert.match(on[1], /max-height: 1\.6em/, '展开到一行的高度');
+  assert.match(on[1], /opacity: \.78/, '副行比主文案淡一档');
+
+  const data = {
+    partial: { turn: 4, step: 1, blocks: [{ kind: 'reasoning', text: '我先读取配置文件，看看入口在哪。' }] },
+    runningCalls: [],
+    nodes: [],
+  };
+  const find = (node, test) => {
+    if (!node || typeof node !== 'object') return null;
+    if (node.props && test(node)) return node;
+    for (const child of node.children || []) {
+      const hit = find(child, test);
+      if (hit) return hit;
+    }
+    return null;
+  };
+  const previous = globalThis.localStorage;
+  try {
+    globalThis.localStorage = { getItem: () => JSON.stringify({ subLine: true }), setItem: () => {} };
+    const wide = render(data);
+    const shell = find(wide, (node) => typeof node.props.className === 'string'
+      && /^pgc-sub-wrap( |$)/.test(node.props.className));
+    assert.ok(shell, '副行外面必须有一层 .pgc-sub-wrap（不是直接挂 .pgc-sub）');
+    assert.match(shell.props.className, /pgc-sub-wrap--on/, '有内容时要带展开态');
+    const inner = find(shell, (node) => node.props.className === 'pgc-sub');
+    assert.ok(inner, '.pgc-sub 要包在壳里面');
+    assert.match(text(inner), /读取配置文件/);
+
+    // 关掉时壳仍然在树上（收起靠 max-height 过渡，不是把节点摘掉）。
+    globalThis.localStorage = { getItem: () => JSON.stringify({ subLine: false }), setItem: () => {} };
+    const hidden = render(data);
+    const closed = find(hidden, (node) => typeof node.props.className === 'string'
+      && /^pgc-sub-wrap( |$)/.test(node.props.className));
+    assert.ok(closed, '关掉副行时壳也要常驻，否则没有东西可过渡');
+    assert.doesNotMatch(closed.props.className, /pgc-sub-wrap--on/, '关掉时不许带展开态');
+  } finally {
+    if (previous === undefined) delete globalThis.localStorage;
+    else globalThis.localStorage = previous;
+  }
+});
+
+test('工具在跑的时候副行不消失：整轮都在，state 翻成 running 也不摘', () => {
+  const reasoning = '我先读取配置文件，看看入口在哪。然后决定改哪里。';
+  const base = {
+    partial: { turn: 9, step: 2, blocks: [{ kind: 'reasoning', text: reasoning }] },
+    runningCalls: [],
+    nodes: [],
+    turnEnds: new Map(),
+  };
+  const thinking = __test.deriveCaption(base);
+  assert.equal(thinking.state, 'thinking');
+  assert.match(thinking.sub, /读取配置文件/, '思考时有副行');
+
+  // 工具一起来，state 变 running：以前这里 sub 是 undefined，副行被整块摘掉。
+  const running = __test.deriveCaption({
+    ...base,
+    runningCalls: [{ callId: 'c1', name: 'bash', step: 2, time: Date.now(), argsRaw: '{"command":"npm test"}' }],
+  });
+  assert.equal(running.state, 'running');
+  assert.equal(running.sub, thinking.sub, '工具在跑时副行那句原话不许变、更不许消失');
+
+  // 渲染层也核一遍：running 态那条副行确实还在条上。
+  const previous = globalThis.localStorage;
+  try {
+    globalThis.localStorage = { getItem: () => JSON.stringify({ subLine: true }), setItem: () => {} };
+    const view = render({
+      ...base,
+      runningCalls: [{ callId: 'c1', name: 'bash', step: 2, time: Date.now(), argsRaw: '{"command":"npm test"}' }],
+    });
+    assert.match(view.props.className, /pgc-strip--running/, '这一帧就是 running 态');
+    assert.match(text(view), /读取配置文件/, 'running 期间副行必须还在条上');
   } finally {
     if (previous === undefined) delete globalThis.localStorage;
     else globalThis.localStorage = previous;
