@@ -50,9 +50,14 @@ const sheet = (open) => `
               </button>`, '打开后，标记按 Claude 的弹跳 / 斜线 / 绕圈轮换。')}${row('字幕条颜色', `
               <span class="pgc-swatches" role="group">
                 <button type="button" class="pgc-swatch pgc-swatch--auto" data-on="false" title="跟随主题">A</button>
-                <button type="button" class="pgc-swatch" data-on="true" title="海蓝" style="--pgc-sw:#4d6bfe"></button>
-                <button type="button" class="pgc-swatch" data-on="false" title="玫红" style="--pgc-sw:#e0558c"></button>
-              </span>`)}${row('俏皮词样子', `
+                <button type="button" class="pgc-swatch" data-on="true" title="DS 蓝" style="--pgc-sw:#4d6bfe"></button>
+                <button type="button" class="pgc-swatch" data-on="false" title="Claude 橙" style="--pgc-sw:#d97757"></button>
+                <button type="button" class="pgc-swatch pgc-swatch--rainbow" data-on="false" title="自定义" style="--pgc-sw:conic-gradient(#e0558c,#e0893f,#3f9d6a,#4d6bfe,#8b5cf6,#e0558c)">◍</button>
+              </span>`)}<div class="pgc-picker-row">
+              <div class="pgc-picker" style="--pgc-picked:${'#7a5cf0'}">
+                <span class="pgc-picker-mark"></span>
+              </div>
+            </div>${row('俏皮词样子', `
               <span class="pgc-seg" role="group">
                 <button type="button" class="pgc-seg-btn" data-on="true">渐隐</button>
                 <button type="button" class="pgc-seg-btn" data-on="false">实心</button>

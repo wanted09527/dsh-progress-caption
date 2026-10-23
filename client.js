@@ -372,8 +372,9 @@ window.__ModuleLoader__.load({
         toneTheme: '跟随主题',
         toneTint: '渐隐',
         toneSolid: '实心',
-        swOcean: '海蓝',
-        swRose: '玫红',
+        swDs: 'DS 蓝',
+        swClaude: 'Claude 橙',
+        toneCustom: '自定义',
         words: '显示俏皮词',
         wordsOn: '开',
         wordsOff: '关',
@@ -494,8 +495,9 @@ window.__ModuleLoader__.load({
         toneTheme: 'Theme',
         toneTint: 'Faded',
         toneSolid: 'Solid',
-        swOcean: 'Ocean',
-        swRose: 'Rose',
+        swDs: 'DS blue',
+        swClaude: 'Claude orange',
+        toneCustom: 'Custom',
         words: 'Playful words',
         wordsOn: 'On',
         wordsOff: 'Off',
@@ -663,7 +665,7 @@ window.__ModuleLoader__.load({
     const DEFAULT_SETTINGS = {
       size: 'm', subLine: false, anim: 'calm', motion: 'plain',
       words: true,
-      accent: 'theme', flavorStyle: 'tint',
+      accent: 'theme', accentCustom: '#4d6bfe', flavorStyle: 'tint',
     };
     const SIZES = ['s', 'm', 'l'];
     /** 俏皮词样子只有两档：渐隐（默认）/ 实心。老存档的 'plain'（素色）已删，
@@ -678,9 +680,28 @@ window.__ModuleLoader__.load({
      */
     const ACCENTS = {
       theme: { label: 'toneTheme', value: '' },
-      ocean: { label: 'swOcean', value: '#4d6bfe' },
-      rose: { label: 'swRose', value: '#e0558c' },
+      ds: { label: 'swDs', value: '#4d6bfe' },
+      claude: { label: 'swClaude', value: '#d97757' },
+      // value 为空表示「颜色不写死在表里」：theme 读主题变量，custom 读 settings.accentCustom。
+      custom: { label: 'toneCustom', value: '' },
     };
+
+    /** `#rrggbb` 才算数，别把用户乱填的东西塞进 style。 */
+    function isHex(value) {
+      return typeof value === 'string' && /^#[0-9a-f]{6}$/i.test(value);
+    }
+
+    /** HSL(0-360, 0-1, 0-1) → `#rrggbb`，给取色方框用。 */
+    function hslToHex(h, sat, light) {
+      const c = (1 - Math.abs(2 * light - 1)) * sat;
+      const x = c * (1 - Math.abs(((h / 60) % 2) - 1));
+      const m = light - c / 2;
+      const seg = [[c, x, 0], [x, c, 0], [0, c, x], [0, x, c], [x, 0, c], [c, 0, x]][Math.floor(h / 60) % 6];
+      return '#' + seg.map((v) => {
+        const n = Math.round((v + m) * 255);
+        return (n < 16 ? '0' : '') + n.toString(16);
+      }).join('');
+    }
 
     function pickFrom(table, value, fallbackKey) {
       return table[value] ? value : fallbackKey;
@@ -688,8 +709,12 @@ window.__ModuleLoader__.load({
 
     /** 把选中的主色折算成 CSS 变量，挂在字幕条根节点上。 */
     function stripVars(settings) {
-      const accent = ACCENTS[settings.accent] || ACCENTS.theme;
       const vars = {};
+      if (settings.accent === 'custom') {
+        if (isHex(settings.accentCustom)) vars['--pgc-accent'] = settings.accentCustom;
+        return vars;
+      }
+      const accent = ACCENTS[settings.accent] || ACCENTS.theme;
       if (accent.value) vars['--pgc-accent'] = accent.value;
       return vars;
     }
@@ -711,7 +736,13 @@ window.__ModuleLoader__.load({
         anim: pick(source.anim, ANIMS, DEFAULT_SETTINGS.anim),
         motion: pick(source.motion, MOTIONS, DEFAULT_SETTINGS.motion),
         words: source.words === undefined ? DEFAULT_SETTINGS.words : Boolean(source.words),
-        accent: pickFrom(ACCENTS, source.accent, DEFAULT_SETTINGS.accent),
+        // 老存档里的 ocean / rose 折成新的 ds / claude，别让升级把颜色重置回主题色。
+        accent: pickFrom(
+          ACCENTS,
+          source.accent === 'ocean' ? 'ds' : source.accent === 'rose' ? 'claude' : source.accent,
+          DEFAULT_SETTINGS.accent,
+        ),
+        accentCustom: isHex(source.accentCustom) ? source.accentCustom : DEFAULT_SETTINGS.accentCustom,
         // 同上：老存档的 flavorStyle:'plain'（素色档已删）折回 'tint'。
         flavorStyle: pick(source.flavorStyle, FLAVOR_STYLES, DEFAULT_SETTINGS.flavorStyle),
       };
@@ -1629,18 +1660,43 @@ window.__ModuleLoader__.load({
       }, Object.keys(table).map((key) => h('button', {
         type: 'button',
         key,
-        className: 'pgc-swatch' + (table[key].value ? '' : ' pgc-swatch--auto'),
+        className: 'pgc-swatch'
+          + (table[key].value ? '' : key === 'custom' ? ' pgc-swatch--rainbow' : ' pgc-swatch--auto'),
         'data-on': key === value ? 'true' : 'false',
         'aria-pressed': key === value ? 'true' : 'false',
         'aria-label': t(table[key].label),
         title: t(table[key].label),
-        style: table[key].value ? { '--pgc-sw': table[key].value } : undefined,
+        style: table[key].value
+          ? { '--pgc-sw': table[key].value }
+          : key === 'custom'
+            ? { '--pgc-sw': 'conic-gradient(#e0558c, #e0893f, #3f9d6a, #4d6bfe, #8b5cf6, #e0558c)' }
+            : undefined,
         onClick: () => onChange(key),
-      }, table[key].value ? '' : 'A')));
+      }, table[key].value ? '' : key === 'custom' ? '◍' : 'A')));
 
-      const switchButton = (on, label, hint, flip) => h('button', {
+      // 第四参 wide：标签文字会随开关状态变长（「经典三点」↔「Claude 三态」），
+      // 不定宽的话整颗开关会左右跳一格。定宽后轨道位置钉住不动。
+      // 自定义取色：横向是色相，纵向是明度。点哪儿取哪儿，松手写进设置。
+      // 只在选中「自定义」时才出现，平时不占地方。
+      const customPicker = (value, onChange) => h('div', {
+        className: 'pgc-picker',
+        role: 'slider',
+        'aria-label': t('toneCustom'),
+        'aria-valuetext': value,
+        title: t('toneCustom'),
+        style: { '--pgc-picked': value },
+        onClick: (event) => {
+          const rect = event.currentTarget.getBoundingClientRect();
+          if (!rect.width || !rect.height) return;
+          const hue = Math.max(0, Math.min(1, (event.clientX - rect.left) / rect.width)) * 360;
+          const light = 0.9 - Math.max(0, Math.min(1, (event.clientY - rect.top) / rect.height)) * 0.72;
+          onChange(hslToHex(hue, 0.86, light));
+        },
+      }, h('span', { className: 'pgc-picker-mark' }));
+
+      const switchButton = (on, label, hint, flip, wide) => h('button', {
         type: 'button',
-        className: 'pgc-switch',
+        className: 'pgc-switch' + (wide ? ' pgc-switch--wide' : ''),
         role: 'switch',
         'aria-checked': on ? 'true' : 'false',
         'data-on': on ? 'true' : 'false',
@@ -1695,8 +1751,12 @@ window.__ModuleLoader__.load({
               t(settings.motion === 'claude' ? 'motionClaude' : 'motionPlain'),
               '',
               () => update({ motion: settings.motion === 'claude' ? 'plain' : 'claude' }),
+              true,
             ), 'motionHint'),
             settingRow(t, 'colorAccent', swatches('accent', settings.accent, ACCENTS, (value) => update({ accent: value }))),
+            settings.accent === 'custom'
+              ? h('div', { className: 'pgc-picker-row' }, customPicker(settings.accentCustom, (value) => update({ accentCustom: value })))
+              : null,
             settingRow(t, 'colorFlavor', seg('flavorStyle', settings.flavorStyle, [
               { value: 'tint', label: 'toneTint' },
               { value: 'solid', label: 'toneSolid' },
@@ -2358,12 +2418,32 @@ window.__ModuleLoader__.load({
   background: color-mix(in srgb, var(--dsw-alias-brand-primary, #4f7cff) 20%, transparent);
   box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--dsw-alias-brand-primary, #4f7cff) 34%, transparent);
 }
+.pgc-switch--wide .pgc-switch-label { min-width: 5.4em; text-align: left; }
 .pgc-switch { display: inline-flex; align-items: center; gap: 7px; padding: 0; border: 0; background: transparent; color: var(--dsw-alias-label-secondary, currentColor); font: inherit; font-size: 11px; cursor: pointer; }
 .pgc-switch-track { position: relative; width: 30px; height: 18px; border-radius: 999px; background: color-mix(in srgb, currentColor 22%, transparent); transition: background-color .2s ease; }
 .pgc-switch-thumb { position: absolute; top: 2px; left: 2px; width: 14px; height: 14px; border-radius: 999px; background: #fff; box-shadow: 0 1px 3px rgba(0,0,0,.35); transition: transform .2s cubic-bezier(.3,.9,.3,1); }
 .pgc-switch[data-on='true'] .pgc-switch-track { background: var(--dsw-alias-brand-primary, #4f7cff); }
 .pgc-switch[data-on='true'] .pgc-switch-thumb { transform: translateX(12px); }
 .pgc-switch[data-on='true'] .pgc-switch-label { color: var(--dsw-alias-label-primary, currentColor); }
+.pgc-picker-row { padding: 2px 0 6px; }
+.pgc-picker {
+  position: relative;
+  height: 56px;
+  border-radius: 10px;
+  cursor: crosshair;
+  border: 1px solid var(--dsw-alias-border-l1, rgba(127,127,127,.28));
+  background:
+    linear-gradient(to bottom, rgba(255,255,255,.95), rgba(255,255,255,0) 55%, rgba(0,0,0,.55)),
+    linear-gradient(to right, #ff0000, #ffff00, #00ff00, #00ffff, #0000ff, #ff00ff, #ff0000);
+}
+.pgc-picker-mark {
+  position: absolute;
+  right: 6px; bottom: 6px;
+  width: 16px; height: 16px;
+  border-radius: 999px;
+  background: var(--pgc-picked, transparent);
+  box-shadow: 0 0 0 2px #fff, 0 0 0 3px rgba(0,0,0,.28);
+}
 /* 全静止档：条停住，但整条留着 —— 一条实心短线当作「进行中」的静态记号。
    不留空轨（那看着像坏了），也不再压到 .45（静态下压暗等于没画）。 */
 .pgc-anim-off .pgc-label::after { content: none; animation: none; }
@@ -2588,6 +2668,8 @@ window.__ModuleLoader__.load({
         writeSettings,
         normalizeSettings,
         stripVars,
+        hslToHex,
+        isHex,
         ACCENTS,
         ANIMS,
         MOTIONS,

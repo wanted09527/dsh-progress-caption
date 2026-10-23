@@ -586,13 +586,13 @@ test('设置：坏值一律兜底回默认，删掉的档位折回默认档', ()
   assert.deepEqual(__test.normalizeSettings(null), __test.DEFAULT_SETTINGS);
   assert.deepEqual(__test.normalizeSettings({ size: 'xxl', subLine: 'yes', anim: 'boom', shape: 'donut', words: 'yes' }), {
     size: 'm', subLine: true, anim: 'calm', motion: 'plain', words: true,
-    accent: 'theme', flavorStyle: 'tint',
+    accent: 'theme', accentCustom: '#4d6bfe', flavorStyle: 'tint',
   });
   // 老存档兼容：anim:'off'（全静止档已删）与 flavorStyle:'plain'（素色档已删）
   // 都是非法值，一律折回默认档，而不是原样带进运行期。
   assert.deepEqual(__test.normalizeSettings({ size: 'l', subLine: true, anim: 'off', words: false }), {
     size: 'l', subLine: true, anim: 'calm', motion: 'plain', words: false,
-    accent: 'theme', flavorStyle: 'tint',
+    accent: 'theme', accentCustom: '#4d6bfe', flavorStyle: 'tint',
   });
   assert.equal(__test.normalizeSettings({ flavorStyle: 'plain' }).flavorStyle, 'tint', '素色档折回渐隐');
   // 删掉的字段不再出现在结果里，老存档带进来也不会被读。
@@ -616,26 +616,37 @@ test('设置：没有 localStorage 也不崩', () => {
 test('配色：选了主色才挂变量，跟随主题时一个都不挂，成功 / 失败色不再由用户决定', () => {
   // 跟随主题：不注入变量，CSS 会自己退回 --dsw-alias-* 主题色
   assert.deepEqual(__test.stripVars({ accent: 'theme' }), {});
-  const vars = __test.stripVars({ accent: 'ocean' });
+  const vars = __test.stripVars({ accent: 'ds' });
   assert.equal(vars['--pgc-accent'], '#4d6bfe');
   assert.equal(vars['--pgc-ok'], undefined, '成功色不再由设置注入，走主题变量');
   assert.equal(vars['--pgc-bad'], undefined, '失败色同理');
   assert.deepEqual(Object.keys(vars), ['--pgc-accent'], '除主色外一个变量都不挂');
   // 表里没有的键一律当「跟随主题」，不抛异常
   assert.deepEqual(__test.stripVars({ accent: 'nope' }), {});
+  // 自定义：只认合法 #rrggbb，乱填的一律不挂变量
+  assert.deepEqual(__test.stripVars({ accent: 'custom', accentCustom: '#12ab34' }), { '--pgc-accent': '#12ab34' });
+  assert.deepEqual(__test.stripVars({ accent: 'custom', accentCustom: 'red; behavior:url(x)' }), {});
+  assert.deepEqual(__test.stripVars({ accent: 'custom' }), {});
 });
 
-test('配色：色值都是合法十六进制，且三项里正好两个可选色互不相同', () => {
+test('配色：三项预设（跟随主题 / DS 蓝 / Claude 橙）加一项自定义', () => {
   const accents = __test.ACCENTS;
-  assert.deepEqual(Object.keys(accents), ['theme', 'ocean', 'rose'], '主色只留跟随主题 / 蓝 / 粉');
-  const values = Object.keys(accents)
-    .map((key) => accents[key].value)
-    .filter(Boolean);
-  assert.equal(values.length, 2, '除跟随主题外只剩两个可选色');
-  values.forEach((value) => assert.match(value, /^#[0-9a-f]{6}$/i));
-  assert.equal(new Set(values).size, values.length, '主色不能有重复');
-  assert.equal(accents.ocean.value, '#4d6bfe', '蓝');
-  assert.equal(accents.rose.value, '#e0558c', '粉');
+  assert.deepEqual(Object.keys(accents), ['theme', 'ds', 'claude', 'custom'], '预设三个 + 自定义一个');
+  assert.equal(accents.theme.value, '', '跟随主题不写死色值');
+  assert.equal(accents.ds.value, '#4d6bfe', 'DS 蓝');
+  assert.equal(accents.claude.value, '#d97757', 'Claude 橙');
+  assert.equal(accents.custom.value, '', '自定义的颜色来自设置，不写在表里');
+  for (const key of ['ds', 'claude']) assert.match(accents[key].value, /^#[0-9a-f]{6}$/i);
+});
+
+test('取色方框：HSL 转出来的都是合法 #rrggbb', () => {
+  for (const hue of [0, 60, 120, 200, 300, 359]) {
+    for (const light of [0.2, 0.5, 0.9]) {
+      assert.match(__test.hslToHex(hue, 0.86, light), /^#[0-9a-f]{6}$/i);
+    }
+  }
+  assert.equal(__test.hslToHex(0, 1, 0.5), '#ff0000', '纯红');
+  assert.equal(__test.hslToHex(120, 1, 0.5), '#00ff00', '纯绿');
 });
 
 test('设置面板：不再有「长什么样 / 颜色 / 说什么」分组标题，改成一行一个设置', () => {
@@ -680,7 +691,7 @@ test('配色选中后会写回 root 的 style，且 class 带上俏皮词样式'
   const previous = globalThis.localStorage;
   // 老存档里的 violet / teal / orange 都已删：非法值折回「跟随主题」，不注入任何变量。
   globalThis.localStorage = {
-    getItem: () => JSON.stringify({ accent: 'rose', okColor: 'teal', badColor: 'orange', flavorStyle: 'solid' }),
+    getItem: () => JSON.stringify({ accent: 'claude', okColor: 'teal', badColor: 'orange', flavorStyle: 'solid' }),
     setItem: () => {},
   };
   try {
@@ -689,7 +700,7 @@ test('配色选中后会写回 root 的 style，且 class 带上俏皮词样式'
       runningCalls: [],
       nodes: [],
     });
-    assert.equal(view.props.style['--pgc-accent'], '#e0558c');
+    assert.equal(view.props.style['--pgc-accent'], '#d97757');
     assert.equal(view.props.style['--pgc-ok'], undefined, '成功色不再写内联变量');
     assert.equal(view.props.style['--pgc-bad'], undefined, '失败色不再写内联变量');
     assert.match(view.props.className, /pgc-flavor-solid/);
@@ -1059,12 +1070,13 @@ test('设置面板里「状态标记」是开关：关=经典三点，开=Claude
     (node.children || []).forEach(collect);
   };
   collect(row);
-  assert.ok(rowClasses.includes('pgc-switch'), '这一行是开关，不是分段选择');
+  assert.ok(rowClasses.some((c) => c.split(/\s+/).includes('pgc-switch')), '这一行是开关，不是分段选择');
   assert.ok(!rowClasses.includes('pgc-seg'), '分段控件不许留下');
   const switchProps = [];
   const grabSwitch = (node) => {
     if (!node || typeof node !== 'object') return;
-    if (node.props && node.props.className === 'pgc-switch') switchProps.push(node.props);
+    if (node.props && typeof node.props.className === 'string'
+      && node.props.className.split(/\s+/).includes('pgc-switch')) switchProps.push(node.props);
     (node.children || []).forEach(grabSwitch);
   };
   grabSwitch(row);
@@ -1145,7 +1157,8 @@ test('设置面板里「状态标记」是开关：关=经典三点，开=Claude
     let onSwitch = null;
     const findOn = (node) => {
       if (!node || typeof node !== 'object') return;
-      if (node.props && node.props.className === 'pgc-switch') onSwitch = node.props;
+      if (node.props && typeof node.props.className === 'string'
+        && node.props.className.split(/[ 	]+/).includes('pgc-switch')) onSwitch = node.props;
       (node.children || []).forEach(findOn);
     };
     findOn(onRow);
@@ -1155,6 +1168,65 @@ test('设置面板里「状态标记」是开关：关=经典三点，开=Claude
   } finally {
     if (previous === undefined) delete globalThis.localStorage;
     else globalThis.localStorage = previous;
+  }
+});
+
+test('状态标记开关不位移：标签定宽，换文案时轨道不跳', () => {
+  const view = render({
+    partial: { turn: 2, step: 0, blocks: [{ kind: 'reasoning', text: '看看配置' }] },
+    runningCalls: [],
+    nodes: [],
+  });
+  const switches = [];
+  const walk = (node) => {
+    if (!node || typeof node !== 'object') return;
+    if (node.props && typeof node.props.className === 'string'
+      && node.props.className.split(/[ 	]+/).includes('pgc-switch')) switches.push(node.props.className);
+    (node.children || []).forEach(walk);
+  };
+  walk(view);
+  assert.ok(switches.includes('pgc-switch pgc-switch--wide'), '状态标记那颗开关带定宽类');
+  assert.equal(switches.filter((c) => c.includes('pgc-switch--wide')).length, 1, '只有它需要定宽');
+  assert.match(sheet, /\.pgc-switch--wide \.pgc-switch-label \{ min-width: [0-9.]+em/, '标签定宽，换文案时轨道不左右跳');
+});
+
+test('自定义取色：选了「自定义」才出现渐变方框，平时不占地方', () => {
+  const previous = globalThis.localStorage;
+  const base = {
+    partial: { turn: 2, step: 0, blocks: [{ kind: 'reasoning', text: '看看配置' }] },
+    runningCalls: [],
+    nodes: [],
+  };
+  const findPicker = (node, found) => {
+    if (!node || typeof node !== 'object') return found;
+    if (node.props && typeof node.props.className === 'string'
+      && node.props.className.split(/[ 	]+/).includes('pgc-picker')) found.push(node);
+    (node.children || []).forEach((child) => findPicker(child, found));
+    return found;
+  };
+  try {
+    globalThis.localStorage = { getItem: () => JSON.stringify({ accent: 'ds' }), setItem: () => {} };
+    const plain = findPicker(render(base), []);
+    assert.equal(plain.length, 0, '没选自定义时不该有取色框');
+  } finally {
+    if (previous === undefined) delete globalThis.localStorage;
+    else globalThis.localStorage = previous;
+  }
+  const previous2 = globalThis.localStorage;
+  try {
+    globalThis.localStorage = {
+      getItem: () => JSON.stringify({ accent: 'custom', accentCustom: '#12ab34' }),
+      setItem: () => {},
+    };
+    const view = render(base);
+    const picked = findPicker(view, []);
+    assert.equal(picked.length, 1, '选了自定义才出现取色方框');
+    assert.equal(picked[0].props.role, 'slider', '读屏把它当作可拖动的取色器');
+    assert.equal(picked[0].props['aria-valuetext'], '#12ab34', '当前颜色要念出来');
+    assert.equal(view.props.style['--pgc-accent'], '#12ab34', '自定义色写进根节点变量');
+  } finally {
+    if (previous2 === undefined) delete globalThis.localStorage;
+    else globalThis.localStorage = previous2;
   }
 });
 
