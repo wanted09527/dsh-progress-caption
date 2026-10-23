@@ -169,13 +169,13 @@ const html = `<!doctype html>
 <title>dsh-progress-caption 预览</title>
 <style>
   :root { color-scheme: light dark; }
-  body { margin: 0; padding: 28px; font: 14px/1.5 -apple-system, "Segoe UI", "Microsoft YaHei", sans-serif; background: #eef0f4; color: #1f2328; }
+  body { margin: 0; padding: 28px 28px 48px; font: 14px/1.5 -apple-system, "Segoe UI", "Microsoft YaHei", sans-serif; background: #eef0f4; color: #1f2328; }
   h1 { margin: 0 0 4px; font-size: 18px; }
   .hint { margin: 0 0 22px; font-size: 12.5px; opacity: .6; }
   .panels { display: grid; gap: 22px; grid-template-columns: repeat(auto-fit, minmax(430px, 1fr)); }
   .panel { border-radius: 18px; overflow: visible; box-shadow: 0 18px 40px -28px rgba(0,0,0,.5); }
   .panel h2 { margin: 0; padding: 10px 16px; font-size: 12px; font-weight: 600; letter-spacing: .04em; text-transform: uppercase; opacity: .6; }
-  .dock { padding: 10px 0 26px; min-height: 660px; display: flex; flex-direction: column; justify-content: flex-end; }
+  .dock { padding: 10px 0 26px; min-height: 900px; display: flex; flex-direction: column; justify-content: flex-end; }
   .doc { margin: 0; padding: 34px 16px 14px; font-size: 11.5px; opacity: .55; }
   .light {
     --dsw-alias-bg-base: #ffffff;
