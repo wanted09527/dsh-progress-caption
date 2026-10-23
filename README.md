@@ -393,6 +393,7 @@ v4.1-flash 这类模型思考极快，字是一串串来的。如果字幕逐字
 | `cordis.patch.yml` | 往 profile 里插入一行 `dsh-progress-caption` |
 | `locale/*.json` | 插件列表里显示的名字和说明 |
 | `test/` | 离线测试：假 ctx / 假 store 驱动组件，不起 DSH |
+| `CHANGELOG.md` | 每一版改了什么 |
 
 ## 开发与打包
 
@@ -433,6 +434,10 @@ npm pack --pack-destination dist --cache .npm-cache       # 产出 dist/*.tgz
 
 在插件管理器里移除 `dsh-progress-caption` 这一行即可；浏览器里的设置（`localStorage` 键
 `dsh-progress-caption:settings`）不进 profile，卸载后残留也无副作用，想清干净可在开发者工具里删掉这个键。
+
+## 更新记录
+
+每一版改了什么见 [CHANGELOG.md](CHANGELOG.md)。
 
 ## 许可证
 
