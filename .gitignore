@@ -13,6 +13,11 @@ preview-zoom.png
 measure.html
 .edge-profile/
 
+# 一次性对比页与放大图（脚本在 tools/ 里，随时能重新生成）
+preview-*.html
+zoom.html
+zoom.png
+
 # 杂项
 .t.log
 .DS_Store

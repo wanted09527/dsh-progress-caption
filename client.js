@@ -59,7 +59,7 @@ window.__ModuleLoader__.load({
      *  淡入动画一秒能重播两三次，叠起来就是「一直在闪」。这几步改成硬切换，
      *  第 4 步之后状态稳下来，再恢复成淡入。 */
     const SETTLE_STEPS = 3;
-    /** 动画档位：calm = 只有小圆点轻轻呼吸（默认，最不打扰）；sweep = 文字扫光；off = 全静止。 */
+    /** 动画档位：calm = 只有左侧标记慢慢走（默认，最不打扰）；sweep = 文字扫光；off = 全静止。 */
     const ANIMS = ['calm', 'sweep', 'off'];
     /** 两步之间 partial 会短暂为空；这段时间（毫秒）内仍算「这一轮还在跑」，字幕不许收。 */
     const TURN_GAP_MS = 20000;
@@ -1710,9 +1710,10 @@ window.__ModuleLoader__.load({
               pinnedStep !== null
                 ? h('span', { className: 'pgc-step' }, fmt(t('step'), { n: pinnedStep }))
                 : null,
-              // 三个小点排队跳：借的是 dsh-claude-style 的 bounce 轨道
-              // （三颗 4px 圆点，同一个 keyframes，靠 nth-child 错开负的 animation-delay）。
-              // 只动 transform / opacity，不改宽高，所以不会推挤右边的主文案。
+              // 状态标记：一组三点循环（和右侧那个弧线是同一套动作语言）。
+              // 之前这里试过「条 / 圆环 / 立体方块」三种形态，观感没做出来，已整段删掉。
+              // 三个点装在固定宽度的 .pgc-loader 里，靠负 animation-delay 错开相位，
+              // 所以点怎么跳都不会推动右边的主文案。
               h('span', { className: 'pgc-loader', 'aria-hidden': true },
                 h('span', { className: 'pgc-dot' }),
                 h('span', { className: 'pgc-dot' }),
@@ -1854,6 +1855,12 @@ window.__ModuleLoader__.load({
   position: relative;
   /* 根节点故意不挂 animation：它一挂，任何一次重渲染都可能让整条重播一遍，
      那就是「闪」。入场交给 .pgc-band 的收放过渡，视觉上是一整块浮出来。 */
+  /* 状态标记的节奏放在这里，只改一处：左侧的条与右侧那圈弧线共用同一个周期，
+     一条字幕里不出现两种节奏（旧版是点 3.2s、弧 2.2s，两边各走各的）。
+     变量名还叫 --pgc-dot-cycle，因为弧线那几行也在用它，改名要一起动，没必要。 */
+  --pgc-dot-cycle: 2.4s;
+  /* 扫光档的周期：条扫得快一档，跟文字的流光对上（.9s 一次）。 */
+  --pgc-hop-cycle: .9s;
   transition: background-color .2s ease, border-color .2s ease, padding .2s cubic-bezier(.23, 1, .32, 1);
 }
 /* 思考/工具/状态切换时只换底色和描边，绝不重排：整条的高度、位置都不动。 */
@@ -1892,47 +1899,60 @@ window.__ModuleLoader__.load({
 .pgc-step { flex: 0 0 auto; font-variant-numeric: tabular-nums; font-weight: 600; color: var(--pgc-accent); }
 .pgc-strip--ok .pgc-step { color: var(--pgc-ok); }
 .pgc-strip--error .pgc-step { color: var(--pgc-bad); }
-/* 三个 4px 小点。宽度总和固定 16px，不管动画怎么跳都不推动右边的主文案。
-   做法参考 dsh-claude-style 的等待行：三颗点是同一条 keyframes，
-   靠 nth-child 的负 animation-delay 错开相位，看起来像排队跳，而不是整排一起闪。 */
-.pgc-loader { flex: 0 0 auto; display: inline-flex; align-items: flex-end; gap: 2px; width: 16px; height: 7px; }
+/* ── 状态标记：三颗 4px 的点，排队起跳 ────────────────────────────────────────
+   形态照着 dsh-claude-style 的 .dsh-claude-chat-wait-dot 抄（
+   node_modules/dsh-claude-style/lib/client.js）：
+   - 容器 18×14，三颗点各自绝对定位在 left 0 / 7 / 14px；
+   - 周期 .5s、ease、infinite alternate：一条动画既去又回，不用写两段；
+   - 三颗的负延迟分别是 -1 周期 / -3/5 周期 / -2/5 周期 —— 于是任何时候
+     都有一颗在最高点、一颗在半空、一颗刚落地，读起来是「接力跳」而不是三颗齐跳；
+   - 关键帧里先压扁再弹起（squash & stretch）：0% 时 scale(1.7,.25) 贴地，
+     起来后拉回 1，落地那一下才有重量感；
+   - 全程只动 transform，走合成层，不改宽高、不推挤右边的主文案。
+
+   为什么不用「一条横扫的线 / 绕圈的点 / 立体方块」：那三套做过了，观感不对，已删。
+   容器定宽 18px，跳动幅度在容器内部消化，右侧文案一格都不动。 */
+.pgc-loader {
+  position: relative;
+  flex: 0 0 auto;
+  width: 18px; height: 14px;
+  overflow: visible;
+  /* 安静档周期（默认）：比扫光档慢一半，属于「在动，但不抢注意力」。 */
+  --pgc-dot-period: 1.1s;
+}
 .pgc-dot {
-  width: 4px; height: 4px; border-radius: 50%;
+  position: absolute;
+  bottom: 0; left: 0;
+  width: 4px; height: 4px;
+  border-radius: 50%;
   background: var(--pgc-accent);
+  /* 以底部为铰链：压扁时往下铺、拉长时往上顶，看起来才像「踩在地上」。 */
   transform-origin: 50% 100%;
-  /* 状态从「进行中」翻到「成功 / 失败」时，颜色是渐过去的，不是啪一下换掉。 */
   transition: background-color .26s cubic-bezier(.23, 1, .32, 1);
 }
-/* 安静档（默认）：三颗点做「淡 → 亮 → 淡」，相位依次错开 1/3 周期，
-   于是一条小波浪从左往右传过去。
-   旧写法只改 box-shadow 扩散半径、而且三颗完全同步：4px 的点上那点光晕变化根本看不出来，
-   三颗又一齐明暗，肉眼看就是「一动不动」——这就是「第几步后面那个点不动」的来源。
-   周期取 3.2s，跟右边那圈绕圈的点（.pgc-anim-calm .pgc-arc > span）保持一致，
-   一条字幕里不出现两种节奏。 */
-.pgc-anim-calm .pgc-dot { animation: pgc-breathe 3.2s ease-in-out infinite; }
-/* 负延迟 = 提前进入相位。选值要让三颗的「最亮时刻」依次往后排：
-   dot1 在 1.60s、dot2 在 2.67s、dot3 在 3.73s（≡0.53s），波动方向才是左 → 右。 */
-.pgc-anim-calm .pgc-dot:nth-child(2) { animation-delay: -2.13s; }
-.pgc-anim-calm .pgc-dot:nth-child(3) { animation-delay: -1.07s; }
-/* 扫光档：三颗点排队跳起来（0.9s 一轮，相位差 0.3s），配合文字的流光。 */
-.pgc-anim-sweep .pgc-dot { animation: pgc-hop .9s cubic-bezier(.37, 0, .63, 1) infinite; }
-.pgc-anim-sweep .pgc-dot:nth-child(2) { animation-delay: -.6s; }
-.pgc-anim-sweep .pgc-dot:nth-child(3) { animation-delay: -.3s; }
-/* 成功 / 失败态：只换颜色，不再把点冻住。
-   原来这里写 animation: none —— 结果是「动作已经跑完、但这一轮还没收」的那几秒里，
-   左边的点定住了，右边俏皮词还在滚，一边静一边动，看着像坏了。
-   这里刻意**不降速**：早先试过放慢到 6.4s，结果三颗点的相位差被摊薄，
-   实测透明度只有 0.38/0.41/0.38 —— 又变成「看不出在动」。节奏保持 3.2s。 */
-.pgc-strip--ok .pgc-dot,
-.pgc-strip--error .pgc-dot {
-  animation-name: pgc-breathe;
-  animation-duration: 3.2s;
-  animation-timing-function: ease-in-out;
-  animation-iteration-count: infinite;
-  opacity: 1; transform: none;
+.pgc-dot:nth-child(2) { left: 7px; }
+.pgc-dot:nth-child(3) { left: 14px; }
+/* 安静 / 扫光两档都在跳，只是周期不同；扫光档跟文字的光带对上（.5s）。 */
+.pgc-anim-calm .pgc-dot,
+.pgc-anim-sweep .pgc-dot {
+  animation: pgc-dot-bounce var(--pgc-dot-period) ease infinite alternate;
 }
+.pgc-anim-calm .pgc-dot:nth-child(1),
+.pgc-anim-sweep .pgc-dot:nth-child(1) { animation-delay: calc(-1 * var(--pgc-dot-period)); }
+.pgc-anim-calm .pgc-dot:nth-child(2),
+.pgc-anim-sweep .pgc-dot:nth-child(2) { animation-delay: calc(-3 * var(--pgc-dot-period) / 5); }
+.pgc-anim-calm .pgc-dot:nth-child(3),
+.pgc-anim-sweep .pgc-dot:nth-child(3) { animation-delay: calc(-2 * var(--pgc-dot-period) / 5); }
+.pgc-anim-sweep .pgc-loader { --pgc-dot-period: var(--pgc-hop-cycle); }
+/* 成功 / 失败态：只换颜色，不把标记冻住。
+   原来这里写 animation: none —— 结果是「动作已经跑完、但这一轮还没收」的那几秒里，
+   左边定住了、右边俏皮词还在滚，一边静一边动，看着像坏了。 */
 .pgc-strip--ok .pgc-dot { background: var(--pgc-ok); }
 .pgc-strip--error .pgc-dot { background: var(--pgc-bad); }
+/* 全静止档：三颗点停在原地，只留中间那颗 —— 排一排不动的点在视觉上像「加载卡住」。 */
+.pgc-anim-off .pgc-dot { animation: none; transform: none; opacity: .55; }
+.pgc-anim-off .pgc-dot:nth-child(2),
+.pgc-anim-off .pgc-dot:nth-child(3) { display: none; }
 /* 主文案：一行放不下就省略号，别缩成俩字。
    不再按「行数 2/3」加 line-clamp——主文案是拼出来的整句（十几个字），
    开 2/3 行几乎不会真的折行，视觉上没差别，所以那个设置项已经删了。 */
@@ -2101,7 +2121,7 @@ window.__ModuleLoader__.load({
 .pgc-arc > span:nth-child(2) { transform: rotate(120deg); animation-delay: .18s; }
 .pgc-arc > span:nth-child(3) { transform: rotate(240deg); animation-delay: .36s; }
 /* 安静档：转慢一点，别抢注意力。 */
-.pgc-anim-calm .pgc-arc > span { animation-duration: 3.2s; }
+.pgc-anim-calm .pgc-arc > span { animation-duration: var(--pgc-dot-cycle); }
 /* 全静止档：不转，三个点常亮成一圈。 */
 .pgc-anim-off .pgc-arc > span { animation: none; opacity: .6; }
 /* 已经成功 / 已经失败：没必要继续转，停住，颜色跟随状态色。 */
@@ -2198,9 +2218,8 @@ window.__ModuleLoader__.load({
 .pgc-switch[data-on='true'] .pgc-switch-track { background: var(--dsw-alias-brand-primary, #4f7cff); }
 .pgc-switch[data-on='true'] .pgc-switch-thumb { transform: translateX(12px); }
 .pgc-switch[data-on='true'] .pgc-switch-label { color: var(--dsw-alias-label-primary, currentColor); }
-.pgc-anim-off .pgc-dot { animation: none; opacity: .45; }
-/* 全静止档：三颗点里只留一颗，看着像「句号」而不是「排了一半的点」。 */
-.pgc-anim-off .pgc-dot:nth-child(2), .pgc-anim-off .pgc-dot:nth-child(3) { display: none; }
+/* 全静止档：条停住，但整条留着 —— 一条实心短线当作「进行中」的静态记号。
+   不留空轨（那看着像坏了），也不再压到 .45（静态下压暗等于没画）。 */
 .pgc-anim-off .pgc-label::after { content: none; animation: none; }
 /* 「全静止」档真的全静止：入场、换文案、换词都不动，只剩底色过渡（那不算动效）。 */
 .pgc-anim-off .pgc-live, .pgc-anim-off .pgc-label, .pgc-anim-off .pgc-flavor,
@@ -2213,6 +2232,8 @@ window.__ModuleLoader__.load({
   .pgc-strip--handle .pgc-band { max-height: 0; opacity: 0; margin-block: 0; padding-block: 0; }
   /* 不转的时候，点靠 keyframes 才亮起来，这里要补回可见度，否则整个标记会消失。 */
   .pgc-arc > span { opacity: .6 !important; }
+  /* 同理：三点停住后要回到「看得见」的静止形（靠 keyframes 才有位移，一撤就全落回原位）。 */
+  .pgc-dot { transform: none !important; opacity: .85 !important; }
 }
 @keyframes pgc-enter {
   from { opacity: 0; transform: translateY(2px) scale(.984); }
@@ -2232,23 +2253,16 @@ window.__ModuleLoader__.load({
   from { transform: translateY(0); }
   to { transform: translateY(-50%); }
 }
-/* 状态点的呼吸：透明度 .38 → 1，同时抬 1px。
-   形状是「快亮、慢暗」：30% 之后才开始亮，50% 到顶，剩下半程慢慢暗回去。
-   这样三颗错开 1/3 周期时，同一时刻只有一颗在顶上、一颗还压着、一颗正在回落，
-   波浪才看得出方向；用对称的缓入缓出会变成三颗一样亮，等于没动。
-   只动 opacity / transform，不碰宽高（不重排），也不碰 box-shadow（每帧重画阴影更贵）。
-   下限取 .38 而不是 0：点只是暗下去，不会「消失再出现」——那才叫闪。 */
-@keyframes pgc-breathe {
-  0%, 30%, 100% { opacity: .38; transform: translateY(0); }
-  50% { opacity: 1; transform: translateY(-1px); }
-}
-/* 扫光档的三点起跳：只动 transform（合成层），不改宽高、不重排。
-   起点先压扁一点再弹起（squash & stretch），比匀速上下移动更像有重量的东西；
-   这是 dsh-claude-style 的 .dsh-claude-chat-wait-dot 用的手法（它压得更狠，1.7/.25）。 */
-@keyframes pgc-hop {
-  0%, 60%, 100% { transform: translateY(0) scale(1, 1); }
-  8% { transform: translateY(0) scale(1.28, .72); }
-  30% { transform: translateY(-3px) scale(.92, 1.12); }
+/* 三点弹跳：照着 dsh-claude-style 的 @keyframes dsh-claude-wait-dot 写。
+   0% 贴地压扁（scale(1.7,.25)），40% 起跳并收回到正常比例，
+   60% 继续上升，100% 到达最高点。配 infinite alternate 就是「弹起→落回」的往返，
+   ease 让落地前减速、起跳时加速，读起来有重力。
+   translateY 上限 8px 全部落在 14px 高的容器里，不会溢出到文案行。 */
+@keyframes pgc-dot-bounce {
+  0% { transform: translateY(0) scale(1.7, .25); animation-timing-function: linear; }
+  40% { transform: translateY(-3.2px) scale(1, 1); animation-timing-function: linear; }
+  60% { transform: translateY(-4.8px) scale(1, 1); }
+  100% { transform: translateY(-8px) scale(1, 1); }
 }
 /* 扫光关键帧：整条光带从左边界外一路走到右边界外，全程匀速横穿。
    宽度就是整框（100%），所以 -100% 时完全在左侧看不见，100% 时完全越过右侧，

@@ -15,6 +15,9 @@ const killAnim = process.env.ANIM === '1'
   ? ''
   : '.pgc-strip, .pgc-strip * { animation: none !important; transition: none !important; }';
 
+// 三点装载器 —— 和 client.js 里的 JSX 一模一样。
+const LOADER = '<span class="pgc-loader" aria-hidden="true"><span class="pgc-dot"></span><span class="pgc-dot"></span><span class="pgc-dot"></span></span>';
+
 const strip = (body, cls) => `
   <div class="pgc-strip pgc-strip--thinking pgc-size-m pgc-anim-calm pgc-flavor-tint ${cls}" data-plugin="dsh-progress-caption">
     <span class="pgc-band"><span class="pgc-live" role="status" aria-live="polite">${body}</span></span>
@@ -34,7 +37,7 @@ pre { font: 11px/1.5 monospace; background: #f4f4f4; padding: 8px; }
   <div id="one">
   ${strip(`
     <span class="pgc-step">第 2 步</span>
-    <span class="pgc-dot" aria-hidden="true"></span>
+    ${LOADER}
     <span class="pgc-text"><span class="pgc-label">翻一下配置文件</span></span>
     <span class="pgc-flavor">小跑中</span>`, '')}
   </div>
@@ -43,7 +46,7 @@ pre { font: 11px/1.5 monospace; background: #f4f4f4; padding: 8px; }
   <div id="two">
   ${strip(`
     <span class="pgc-step">第 6 步</span>
-    <span class="pgc-dot" aria-hidden="true"></span>
+    ${LOADER}
     <span class="pgc-text">
       <span class="pgc-label">看看配置里怎么写的</span>
       <span class="pgc-sub">先看 package.json 的入口，再决定改哪里</span>
@@ -55,7 +58,7 @@ pre { font: 11px/1.5 monospace; background: #f4f4f4; padding: 8px; }
   <div id="handle">
   ${strip(`
     <span class="pgc-step">第 2 步</span>
-    <span class="pgc-dot" aria-hidden="true"></span>
+    ${LOADER}
     <span class="pgc-text"><span class="pgc-label">翻一下配置文件</span></span>
     <span class="pgc-flavor">小跑中</span>`, 'pgc-strip--handle')}
   </div>

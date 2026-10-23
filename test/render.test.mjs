@@ -171,43 +171,70 @@ test('字幕条宽度跟输入框对齐：减掉两侧留白，不写 100%', () 
   assert.doesNotMatch(body, /(^|\W)width: 100%/, '写 100% 就会把整行撑满');
 });
 
-test('整条字幕条没有无限动画；小圆点在安静档只做呼吸，扫光档才跳', () => {
+test('整条字幕条没有无限动画；状态点是三颗，靠负延迟接力跳', () => {
   const stripRule = /\.pgc-strip \{([\s\S]*?)\}/.exec(sheet)[1];
   assert.doesNotMatch(stripRule, /animation:/, '根节点上不许挂动画（会整条闪）');
-  assert.match(sheet, /\.pgc-anim-calm \.pgc-dot \{ animation: pgc-breathe/, '安静档只给状态点呼吸');
-  assert.match(sheet, /\.pgc-anim-sweep \.pgc-dot \{ animation: pgc-hop/, '扫光档才让三点跳');
-  const breathe = /@keyframes pgc-breathe \{([\s\S]*?)\n\}/.exec(sheet);
-  assert.ok(breathe, '要有 pgc-breathe');
-  // 早先这里断言「呼吸不许动 opacity」，理由是「动了就像在闪」。
-  // 但守着 box-shadow 的结果是 4px 的点上根本看不出在动 —— 用户看到的就是「它不动」。
-  // 现在做法反过来：动 opacity，只是下限卡在 .38，不做 0→1 的全灭全亮。
-  assert.match(breathe[1], /opacity: \.38/, '暗的那一端不能低于 .38，否则就成了闪');
-  assert.doesNotMatch(breathe[1], /opacity: 0[;}\s]/, '不许整颗消失再出现');
-  assert.match(breathe[1], /translateY\(-1px\)/, '要有一点位移，光靠透明度在 4px 的点上还是发飘');
-  assert.doesNotMatch(breathe[1], /(width|height|margin|padding|box-shadow):/, '只许动 opacity / transform');
-  // 三颗点必须错相位：同步呼吸＝三颗一齐明暗，那是最像「坏了」的形态。
-  assert.match(sheet, /\.pgc-anim-calm \.pgc-dot:nth-child\(2\) \{ animation-delay: -2\.13s; \}/);
-  assert.match(sheet, /\.pgc-anim-calm \.pgc-dot:nth-child\(3\) \{ animation-delay: -1\.07s; \}/);
-  // 成功 / 失败态不许再把点冻住：那几秒里右边俏皮词还在滚，一边静一边动看着像坏了。
-  const okDots = /\.pgc-strip--ok \.pgc-dot,\s*\n\s*\.pgc-strip--error \.pgc-dot \{([\s\S]*?)\}/.exec(sheet);
-  assert.ok(okDots, '成功/失败态要单独给状态点写规则');
-  assert.doesNotMatch(okDots[1], /animation: none/, '别再冻住状态点');
-  assert.match(okDots[1], /animation-name: pgc-breathe/, '收尾态继续呼吸，不再冻结');
-  // 别把节奏放慢：放慢到 6.4s 会把三颗的相位差摊薄（实测 0.38/0.41/0.38），又变成「看不出在动」。
-  assert.match(okDots[1], /animation-duration: 3\.2s/, '收尾态沿用 3.2s，不许降速');
-  // 「全静止」档仍然要把点彻底关掉，这个例外必须留着。
-  assert.match(sheet, /\.pgc-anim-off \.pgc-dot \{ animation: none; opacity: \.45; \}/,
-    '全静止档不许被上面的呼吸规则拐回来');
-  // 三点错相位靠负延迟：没有它们就是三颗点一起闪，那才是「闪」。
-  assert.match(sheet, /\.pgc-anim-sweep \.pgc-dot:nth-child\(2\) \{ animation-delay: -\.6s; \}/);
-  assert.match(sheet, /\.pgc-anim-sweep \.pgc-dot:nth-child\(3\) \{ animation-delay: -\.3s; \}/);
+
+  // 容器定宽：三颗点在这个 18×14 的框里跳，右侧主文案一格都不动。
   const loader = /\.pgc-loader \{([\s\S]*?)\}/.exec(sheet);
   assert.ok(loader, '要有 .pgc-loader');
-  assert.match(loader[1], /width: 16px/, '三点总宽写死，跳起来也不会推动主文案');
-  const hop = /@keyframes pgc-hop \{([\s\S]*?)\n\}/.exec(sheet);
-  assert.ok(hop, '要有 pgc-hop');
-  assert.doesNotMatch(hop[1], /(width|height|margin|padding|top|left)/,
-    '起跳只许动 transform，别改宽高（会重排、会抖）');
+  assert.match(loader[1], /width: 18px/, '槽宽固定 18px，动画怎么跑都不推动主文案');
+  assert.match(loader[1], /height: 14px/, '槽高 14px：一行文字约 16.8px，不撑高这一行');
+  assert.doesNotMatch(loader[1], /background: var\(--pgc-accent\);/, '槽本身是空的，颜色由点自己给');
+
+  // 三颗点各自绝对定位，横向排开 0 / 7 / 14px（间距 3px + 点径 4px）。
+  const dot = /\.pgc-dot \{([\s\S]*?)\}/.exec(sheet);
+  assert.ok(dot, '要有 .pgc-dot');
+  assert.match(dot[1], /width: 4px; height: 4px/, '点径 4px');
+  assert.match(dot[1], /border-radius: 50%/, '圆点');
+  assert.match(dot[1], /transform-origin: 50% 100%/, '以底边为铰链，压扁时才是「踩在地上」');
+  assert.match(sheet, /\.pgc-dot:nth-child\(2\) \{ left: 7px; \}/, '第二颗右移一格');
+  assert.match(sheet, /\.pgc-dot:nth-child\(3\) \{ left: 14px; \}/, '第三颗再右移一格');
+
+  // 安静 / 扫光两档都在跳，只是周期不同；同一套 keyframes，不抄第二份。
+  assert.match(sheet, /\.pgc-anim-calm \.pgc-dot,[\s\S]*?\.pgc-anim-sweep \.pgc-dot \{\s*animation: pgc-dot-bounce var\(--pgc-dot-period\) ease infinite alternate;\s*\}/,
+    '两档共用同一条弹跳，靠变量换周期');
+  assert.match(sheet, /\.pgc-anim-sweep \.pgc-loader \{ --pgc-dot-period: var\(--pgc-hop-cycle\); \}/,
+    '扫光档换成快周期，跟文字的光带对上');
+  // 负延迟是「接力」的全部秘密：三颗错开 1 周期 / 3/5 / 2/5。
+  assert.match(sheet, /animation-delay: calc\(-1 \* var\(--pgc-dot-period\)\)/, '第一颗错开整周期');
+  assert.match(sheet, /animation-delay: calc\(-3 \* var\(--pgc-dot-period\) \/ 5\)/, '第二颗错开 3/5 周期');
+  assert.match(sheet, /animation-delay: calc\(-2 \* var\(--pgc-dot-period\) \/ 5\)/, '第三颗错开 2/5 周期');
+
+  // 关键帧：压扁 → 弹起，只动 transform。
+  const bounce = /@keyframes pgc-dot-bounce \{([\s\S]*?)\n\}/.exec(sheet);
+  assert.ok(bounce, '要有 pgc-dot-bounce');
+  const kf = bounce[1].replace(/\/\*[\s\S]*?\*\//g, '');
+  assert.match(kf, /0% \{ transform: translateY\(0\) scale\(1\.7, \.25\); animation-timing-function: linear; \}/,
+    '起点贴地压扁（squash）');
+  assert.match(kf, /100% \{ transform: translateY\(-8px\) scale\(1, 1\); \}/, '到最高点时收回正常比例');
+  assert.doesNotMatch(kf, /(^|[^-])(width|height|margin|padding|top|left|right):/,
+    '只许动 transform，别改宽高（会重排、会抖）');
+  for (const m of kf.matchAll(/translateY\((-?[\d.]+)px\)/g)) {
+    assert.ok(Math.abs(Number(m[1])) <= 8, '纵向位移不超过 8px，落在 14px 高的容器里');
+  }
+
+  // 成功 / 失败态只换色，不冻住：那几秒里右边俏皮词还在滚。
+  assert.match(sheet, /\.pgc-strip--ok \.pgc-dot \{ background: var\(--pgc-ok\); \}/, '成功态换色');
+  assert.match(sheet, /\.pgc-strip--error \.pgc-dot \{ background: var\(--pgc-bad\); \}/, '失败态换色');
+  const frozen = /\.pgc-strip--(ok|error)[^{]*\.pgc-dot[^{]*\{[^}]*animation: none[^}]*\}/.exec(sheet);
+  assert.equal(frozen, null, '收尾态左侧标记继续跑，不许 freezing 成静止');
+
+  // 全静止档：只留中间那颗，排一排不动的点看着像加载卡住。
+  assert.match(sheet, /\.pgc-anim-off \.pgc-dot \{[^}]*animation: none[^}]*\}/, '全静止档真的不动');
+  assert.match(sheet, /\.pgc-anim-off \.pgc-dot:nth-child\(2\),[\s\S]*?display: none;/, '只留一颗当句号');
+
+  // reduced-motion：动画全撤之后，点要回到看得见的静止形。
+  const reduced = /@media \(prefers-reduced-motion: reduce\) \{([\s\S]*?)\n\}/.exec(sheet);
+  assert.ok(reduced, '要有 reduced-motion 兜底');
+  assert.match(reduced[1], /\.pgc-dot \{ transform: none !important; opacity: \.85 !important; \}/,
+    '点要补回可见度，否则整个标记会消失');
+
+  // 旧的三套形态必须彻底消失，不许以任何形式留回来。
+  assert.doesNotMatch(sheet, /pgc-shape-/, '三套形态已删，不许残留 .pgc-shape-*');
+  assert.doesNotMatch(sheet, /pgc-bar-fill|pgc-orbit-ring|pgc-cube-scene/, '三条/圆环/立方体的结构已删');
+  assert.doesNotMatch(sheet, /@keyframes pgc-bar-sweep|@keyframes pgc-orbit-spin|@keyframes pgc-cube-walk/,
+    '三套形态的关键帧已删');
 });
 
 test('扫光横扫整条、方向从左到右、光带与整框同宽', () => {
@@ -505,7 +532,7 @@ const { __test } = mod;
 
 test('设置：坏值一律兜底回默认', () => {
   assert.deepEqual(__test.normalizeSettings(null), __test.DEFAULT_SETTINGS);
-  assert.deepEqual(__test.normalizeSettings({ size: 'xxl', subLine: 'yes', anim: 'boom', words: 'yes' }), {
+  assert.deepEqual(__test.normalizeSettings({ size: 'xxl', subLine: 'yes', anim: 'boom', shape: 'donut', words: 'yes' }), {
     size: 'm', subLine: true, anim: 'calm', words: true, factsOnly: false,
     accent: 'theme', okColor: 'theme', badColor: 'theme', flavorStyle: 'tint',
   });
@@ -513,6 +540,8 @@ test('设置：坏值一律兜底回默认', () => {
     size: 'l', subLine: true, anim: 'off', words: false, factsOnly: true,
     accent: 'theme', okColor: 'theme', badColor: 'theme', flavorStyle: 'tint',
   });
+  // 老存档里那个 shape 字段不再读：形态只有一种，存进来也不认。
+  assert.equal('shape' in __test.normalizeSettings({ shape: 'orbit' }), false, 'shape 已彻底移除');
   // 老存档兼容：lines: 3 等价于 subLine: true；lines: 1 等价于 false。
   assert.equal(__test.normalizeSettings({ lines: 3 }).subLine, true);
   assert.equal(__test.normalizeSettings({ lines: 1 }).subLine, false);
@@ -704,8 +733,12 @@ test('字幕带设置面板：字号 / 思考原话 / 动画 / 俏皮词', () =>
   assert.match(shown, /扫光/);
   assert.match(shown, /安静/);
   assert.match(shown, /全静止/);
+  // 形态选择器已整段撤掉：状态标记只有一种（三点接力跳），不再让用户挑。
+  assert.doesNotMatch(shown, /进行中的标记/);
+  assert.doesNotMatch(shown, /横扫|转圈|立体/);
   assert.match(view.props.className, /pgc-size-m/);
   assert.match(view.props.className, /pgc-anim-calm/);
+  assert.doesNotMatch(view.props.className, /pgc-shape-/);
 });
 
 test('把「没线索时」切到只报动作 → 选中项跟着变', () => {
@@ -821,23 +854,29 @@ test('主文案拼成一整句，免责声明不再挤占这一行', () => {
   assert.match(String(view.props.title || ''), /规则推断/);
 });
 
-test('状态点固定三颗，装在 .pgc-loader 里，不靠文字徽标', () => {
+test('状态标记是三点装载器，装在 .pgc-loader 里，不靠文字徽标', () => {
   const view = render({
     partial: { turn: 1, step: 0, blocks: [{ kind: 'reasoning', text: '先看看 package.json' }] },
     runningCalls: [],
     nodes: [],
   });
-  const dots = [];
   const loaders = [];
   const walk = (node) => {
     if (!node || typeof node !== 'object') return;
-    if (node.props && node.props.className === 'pgc-dot') dots.push(node);
     if (node.props && node.props.className === 'pgc-loader') loaders.push(node);
     (node.children || []).forEach(walk);
   };
   walk(view);
-  assert.equal(loaders.length, 1, '三点要装在一个 .pgc-loader 里，方便整体对齐');
-  assert.equal(dots.length, 3, '三颗点：靠负延迟错开相位，看着像排队跳');
+  assert.equal(loaders.length, 1, '标记要装在一个 .pgc-loader 里，方便整体对齐');
+  const collected = [];
+  const collect = (node, isRoot) => {
+    if (!node || typeof node !== 'object') return;
+    if (!isRoot && node.props && typeof node.props.className === 'string') collected.push(node.props.className);
+    (node.children || []).forEach((child) => collect(child, false));
+  };
+  collect(loaders[0], true);
+  assert.deepEqual(collected.sort(), ['pgc-dot', 'pgc-dot', 'pgc-dot'],
+    '槽里就是三颗点，不再有第二条结构');
 });
 
 test('工具参数 → 只显示文件名 / 搜索词，不显示整段 JSON', () => {
