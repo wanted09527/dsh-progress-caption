@@ -1,5 +1,7 @@
 // 一次性排查脚本：把真实 CSS 抠出来，量「一行」时俏皮词胶囊是否被 .pgc-band 的
-// overflow 裁掉。用法：node tools/measure.mjs 生成 measure.html，再用 headless Edge 的
+// overflow 裁掉，以及换文案交叉淡入时整条字幕的高度有没有变（.pgc-label 只由静态的
+// .pgc-label-cur 撑高，.pgc-label-prev 绝对定位不参与布局）。
+// 用法：node tools/measure.mjs 生成 measure.html，再用 headless Edge 的
 // --dump-dom 读页面里写回 <pre> 的测量结果；带 ANIM=1 可量动画播放中的几何。
 import { readFileSync, writeFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
@@ -38,7 +40,7 @@ pre { font: 11px/1.5 monospace; background: #f4f4f4; padding: 8px; }
   ${strip(`
     <span class="pgc-step">第 2 步</span>
     ${LOADER}
-    <span class="pgc-text"><span class="pgc-label">翻一下配置文件</span></span>
+    <span class="pgc-text"><span class="pgc-label"><span class="pgc-label-cur">翻一下配置文件</span></span></span>
     <span class="pgc-flavor">小跑中</span>`, '')}
   </div>
 
@@ -48,10 +50,36 @@ pre { font: 11px/1.5 monospace; background: #f4f4f4; padding: 8px; }
     <span class="pgc-step">第 6 步</span>
     ${LOADER}
     <span class="pgc-text">
-      <span class="pgc-label">看看配置里怎么写的</span>
+      <span class="pgc-label"><span class="pgc-label-cur">看看配置里怎么写的</span></span>
       <span class="pgc-sub-wrap pgc-sub-wrap--on"><span class="pgc-sub">先看 package.json 的入口，再决定改哪里</span></span>
     </span>
     <span class="pgc-flavor">小跑中</span>`, '')}
+  </div>
+
+  <h3>换文案交叉淡入（新旧两层同时在）</h3>
+  <div id="cross">
+  ${strip(`
+    <span class="pgc-step">第 3 步</span>
+    ${LOADER}
+    <span class="pgc-text">
+      <span class="pgc-label">
+        <span class="pgc-label-cur">看看配置里怎么写的</span>
+        <span class="pgc-label-prev" aria-hidden="true">翻一下配置文件</span>
+      </span>
+    </span>
+    <span class="pgc-flavor">小跑中</span>`, '')}
+  </div>
+
+  <h3>俏皮词换词（新旧两层同时在胶囊里）</h3>
+  <div id="cross-flavor">
+  ${strip(`
+    <span class="pgc-step">第 3 步</span>
+    ${LOADER}
+    <span class="pgc-text"><span class="pgc-label"><span class="pgc-label-cur">看看配置里怎么写的</span></span></span>
+    <span class="pgc-flavor">
+      <span class="pgc-flavor-cur">琢磨中</span>
+      <span class="pgc-flavor-prev" aria-hidden="true">小跑中</span>
+    </span>`, '')}
   </div>
 
   <h3>收起（齿轮）</h3>
@@ -59,29 +87,47 @@ pre { font: 11px/1.5 monospace; background: #f4f4f4; padding: 8px; }
   ${strip(`
     <span class="pgc-step">第 2 步</span>
     ${LOADER}
-    <span class="pgc-text"><span class="pgc-label">翻一下配置文件</span></span>
+    <span class="pgc-text"><span class="pgc-label"><span class="pgc-label-cur">翻一下配置文件</span></span></span>
     <span class="pgc-flavor">小跑中</span>`, 'pgc-strip--handle')}
   </div>
 </div>
 <pre id="out"></pre>
 <script>
 const rows = [];
-for (const id of ['one', 'two', 'handle']) {
+for (const id of ['one', 'two', 'cross', 'cross-flavor', 'handle']) {
   const strip = document.querySelector('#' + id + ' .pgc-strip');
   const band = document.querySelector('#' + id + ' .pgc-band');
   const live = document.querySelector('#' + id + ' .pgc-live');
   const pill = document.querySelector('#' + id + ' .pgc-flavor');
-  if (!strip || !band || !live || !pill) { rows.push(id + ' missing'); continue; }
+  const label = document.querySelector('#' + id + ' .pgc-label');
+  const cur = document.querySelector('#' + id + ' .pgc-label-cur');
+  const prev = document.querySelector('#' + id + ' .pgc-label-prev');
+  const fcur = document.querySelector('#' + id + ' .pgc-flavor-cur');
+  const fprev = document.querySelector('#' + id + ' .pgc-flavor-prev');
+  if (!strip || !band || !live || !pill || !label || !cur) { rows.push(id + ' missing'); continue; }
   const s = strip.getBoundingClientRect();
   const b = band.getBoundingClientRect();
   const l = live.getBoundingClientRect();
   const p = pill.getBoundingClientRect();
+  const lb = label.getBoundingClientRect();
+  const c = cur.getBoundingClientRect();
+  const pr = prev ? prev.getBoundingClientRect() : null;
+  const fc = fcur ? fcur.getBoundingClientRect() : null;
+  const fp = fprev ? fprev.getBoundingClientRect() : null;
   // 只有 band 真的会裁剪时，「超出 band」才算被切掉；overflow:visible 时超出多少都看得见。
   const ov = getComputedStyle(band).overflow;
   const willClip = ov !== 'visible';
   const outside = p.top < b.top - 0.01 || p.bottom > b.bottom + 0.01;
   rows.push(id + ' strip=' + s.height.toFixed(2) + ' band=' + b.height.toFixed(2) +
     ' live=' + l.height.toFixed(2) + ' pill=' + p.height.toFixed(2) +
+    ' label=' + lb.height.toFixed(2) + ' cur=' + c.height.toFixed(2) +
+    ' prev=' + (pr ? pr.height.toFixed(2) : '-') +
+    ' prevAbs=' + (prev ? getComputedStyle(prev).position : '-') +
+    ' pillW=' + p.width.toFixed(2) +
+    ' pillLeft=' + (p.left - l.left).toFixed(2) +
+    ' flavorCur=' + (fc ? fc.width.toFixed(2) : '-') +
+    ' flavorPrev=' + (fp ? fp.width.toFixed(2) : '-') +
+    ' flavorPrevAbs=' + (fprev ? getComputedStyle(fprev).position : '-') +
     ' pillTopOff=' + (p.top - b.top).toFixed(2) +
     ' pillBotOff=' + (b.bottom - p.bottom).toFixed(2) +
     ' overflow=' + ov +

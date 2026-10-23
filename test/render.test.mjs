@@ -357,7 +357,7 @@ test('一行时不许把俏皮词胶囊切掉一条：靠内边距撑开裁剪�
   const band = bandRule[1].replace(/\/\*[\s\S]*?\*\//g, '');
   assert.match(band, /overflow: hidden/, '必须裁剪，否则收起时内容会溢出去压到上一条消息');
   assert.doesNotMatch(band, /overflow: visible/, 'overflow: visible 会导致「指令堆叠时显示异常」');
-  assert.match(band, /padding-block: 6px/, '用内边距把裁剪框撑开，2px 位移才切不到胶囊底边');
+  assert.match(band, /padding-block: 6px/, '用内边距把裁剪框撑开，3px 位移才切不到胶囊底边');
   assert.match(band, /margin-block: -6px/, '负外边距抵回去，外层占位高度才不变');
   const handle = /\.pgc-strip--handle \.pgc-band \{([\s\S]*?)\}/.exec(sheet);
   assert.ok(handle, '收起时要能收成细缝');
@@ -372,23 +372,77 @@ test('系统开了「减少动态效果」就把动画全关掉', () => {
   assert.match(sheet, /transition: none !important/);
 });
 
-test('换文案的动画从半透明起步，不是从 0 闪出来', () => {
-  const swap = /@keyframes pgc-swap \{([\s\S]*?)\n\}/.exec(sheet);
-  assert.ok(swap, '要有 pgc-swap');
-  assert.match(swap[1], /opacity: \.45/, '起点要大于 0，否则每次换字都是「消失再浮现」');
-  assert.doesNotMatch(swap[1], /opacity: 0[;,}]/, '换文案不许从完全透明开始');
-  // 换文案的动画只能挂在「安静 / 扫光」两档上；全静止档必须真的静止。
-  assert.match(sheet, /\.pgc-anim-calm \.pgc-label,\s*\n\s*\.pgc-anim-sweep \.pgc-label \{ animation: pgc-swap/);
-  assert.match(sheet, /\.pgc-anim-off \.pgc-live, \.pgc-anim-off \.pgc-label, \.pgc-anim-off \.pgc-flavor,\s*\n\s*\.pgc-anim-off \.pgc-flavor-track \{ animation: none; \}/);
+test('换文案走交叉淡入：新旧两层同时在 90ms 内一走一进，只动透明度/位移', () => {
+  assert.equal(__test.LABEL_FADE_MS, 90, '两层同时在场的时长就是动画时长');
+  const fadeIn = /@keyframes pgc-label-in \{([\s\S]*?)\n\}/.exec(sheet);
+  const fadeOut = /@keyframes pgc-label-out \{([\s\S]*?)\n\}/.exec(sheet);
+  assert.ok(fadeIn, '要有新句淡入的 pgc-label-in');
+  assert.ok(fadeOut, '要有旧句淡出的 pgc-label-out');
+  assert.match(fadeIn[1], /opacity: 0/, '新句从透明淡入（旧句同时还在，所以不会闪）');
+  assert.match(fadeIn[1], /translateY\(3px\)/, '新句从下往上 3px');
+  assert.match(fadeOut[1], /opacity: 0/, '旧句淡出到透明');
+  assert.match(fadeOut[1], /translateY\(-3px\)/, '旧句往上 3px');
   // 只在合成层动：位移和透明度，绝不出现 width/height/margin 之类会重排的属性。
-  assert.doesNotMatch(swap[1], /\b(width|height|margin|padding|top|left|right|bottom):/,
-    '换文案不许改尺寸或位置属性');
+  for (const rule of [fadeIn[1], fadeOut[1]]) {
+    assert.doesNotMatch(rule, /\b(width|height|margin|padding|top|left|right|bottom):/,
+      '交叉淡入不许改尺寸或位置属性');
+  }
+  // 两条动画都只挂在「安静 / 扫光」两档，且时长与 LABEL_FADE_MS 对齐。
+  assert.match(sheet, /\.pgc-anim-calm \.pgc-label-cur,\s*\n\s*\.pgc-anim-sweep \.pgc-label-cur \{ animation: pgc-label-in 90ms/);
+  assert.match(sheet, /\.pgc-anim-calm \.pgc-label-prev,\s*\n\s*\.pgc-anim-sweep \.pgc-label-prev \{ animation: pgc-label-out 90ms/);
+  // 全静止档必须真的静止，而且不能让旧句多挂 90ms 叠成重影。
+  assert.match(sheet, /\.pgc-anim-off \.pgc-live, \.pgc-anim-off \.pgc-label,\s*\n\s*\.pgc-anim-off \.pgc-label-cur, \.pgc-anim-off \.pgc-label-prev,\s*\n\s*\.pgc-anim-off \.pgc-flavor, \.pgc-anim-off \.pgc-flavor-cur,\s*\n\s*\.pgc-anim-off \.pgc-flavor-prev \{ animation: none; \}/);
+  assert.match(sheet, /\.pgc-anim-off \.pgc-label-prev,\s*\n\s*\.pgc-anim-off \.pgc-flavor-prev \{ display: none; \}/);
+  // 减少动态效果：直接切，旧层不叠在新层上。
+  assert.match(sheet, /\.pgc-label-prev,\s*\n\s*\.pgc-flavor-prev \{ display: none !important; \}/);
+});
+
+test('换文案的两层状态：上一句留成 prev，同一句不重复触发', () => {
+  const initial = { cur: '翻一下配置文件', prev: null };
+  assert.equal(__test.nextLabelLayers(initial, '翻一下配置文件'), initial, '同一句原样返回，不重建层');
+  assert.deepEqual(__test.nextLabelLayers(initial, '看看配置里怎么写的'),
+    { cur: '看看配置里怎么写的', prev: '翻一下配置文件' }, '换句时上一句进 prev');
+  const settled = { cur: '看看配置里怎么写的', prev: null };
+  assert.deepEqual(__test.nextLabelLayers(settled, 'npm test 跑完了'),
+    { cur: 'npm test 跑完了', prev: '看看配置里怎么写的' }, '旧句清掉后再换句，prev 仍然接得上');
+  // 90ms 后清 prev：回到只有一句的稳定态。
+  assert.equal(__test.LABEL_FADE_MS, 90);
+});
+
+test('主文案两层：静态 cur 撑高，prev 绝对定位叠在上面、不参与布局', () => {
+  const view = render({
+    partial: { turn: 1, step: 2, blocks: [{ kind: 'reasoning', text: '跑一下命令' }] },
+    runningCalls: [{ callId: 'c1', name: 'bash', step: 2, time: Date.now() - 1200 }],
+    nodes: [],
+  });
+  let label = null;
+  const walk = (node) => {
+    if (!node || typeof node !== 'object') return;
+    if (Array.isArray(node)) { node.forEach(walk); return; }
+    if (node.props && node.props.className === 'pgc-label') label = node;
+    (node.children || []).forEach(walk);
+  };
+  walk(view);
+  assert.ok(label, '要能找到主文案的 .pgc-label');
+  const kids = label.children || [];
+  assert.equal(kids.length, 1, '平时树里只有一句，旧句只在过渡的 90ms 里存在');
+  assert.equal(kids[0].props.className, 'pgc-label-cur', '静态的新句负责撑高');
+  assert.ok(typeof kids[0].children[0] === 'string' && kids[0].children[0], 'cur 里才是文案');
+  const rule = /\.pgc-label \{([\s\S]*?)\}/.exec(sheet);
+  assert.ok(rule, '要能找到 .pgc-label 规则');
+  assert.match(rule[1], /position: relative/, '外层是 prev 的定位参照');
+  assert.match(rule[1], /overflow: hidden/, '换句时不能让旧句溢出裁切框');
+  const prevRule = /\.pgc-label-prev \{([^}]*position: absolute[^}]*)\}/.exec(sheet);
+  assert.ok(prevRule, '要能找到 .pgc-label-prev 规则');
+  assert.match(prevRule[1], /position: absolute/, '旧句绝对定位，不参与撑高');
+  assert.match(prevRule[1], /inset: 0/, '旧句严格盖在新句同一位置');
+  assert.match(prevRule[1], /pointer-events: none/, '旧句不挡鼠标');
 });
 
 test('整轮最前面几步不播换文案动画：只关「换字」，不关入场', () => {
   assert.equal(__test.SETTLE_STEPS, 3, '前 3 步是状态翻得最勤的一段');
-  const rule = /\.pgc-strip--settle \.pgc-flavor,\s*\n\s*\.pgc-strip--settle \.pgc-flavor-track,\s*\n\s*\.pgc-strip--settle \.pgc-label \{ animation: none; \}/;
-  assert.match(sheet, rule, '前几步换文案一律硬切换');
+  const rule = /\.pgc-strip--settle \.pgc-flavor,\s*\n\s*\.pgc-strip--settle \.pgc-flavor-cur,\s*\n\s*\.pgc-strip--settle \.pgc-label,\s*\n\s*\.pgc-strip--settle \.pgc-label-cur \{ animation: none; \}/;
+  assert.match(sheet, rule, '前几步换文案、换词一律硬切换');
   assert.doesNotMatch(sheet, /\.pgc-strip--settle \.pgc-live \{/,
     '入场动画一次出现只播一次，不是闪烁来源，别一起关掉');
   // 步号整轮常驻：空档时沿用上一个非空步号，不许把「第 N 步」整块摘掉。
@@ -800,7 +854,7 @@ test('设置行是「左标题 + 右控件」两栏，行间靠 .5px 细分隔�
     nodes: [],
   });
 
-  // 结构：每一行都是 .pgc-set-row，里面左边一坨 .pgc-set-text（标题 + 可选说明），
+  // 结构：每一行都是 .pgc-set-row，里面左边一坨 .pgc-set-text（标题 + 可选状态词 + 可选说明），
   // 右边是控件本体。照官方 / Claude 设置页那条 row 来的。
   const rows = [];
   const scanRows = (node) => {
@@ -1084,7 +1138,7 @@ test('设置面板里「状态标记」是开关：关=经典三点，开=Claude
   assert.equal(switchProps[0].role, 'switch', '读屏要念成开关');
   assert.equal(switchProps[0]['aria-checked'], 'false', '默认关着＝经典三点');
 
-  // 开关标签随开关状态换：关着写「经典三点」，打开写「Claude 三态」。
+  // 状态词随开关状态换，位置在左侧标题列：关着写「经典三点」，打开写「Claude 三态」。
   assert.match(shown, /经典三点/);
 
   // 说明不再单独占一段（原来那行 .pgc-sheet-hint 已删），改成行内的一行小字：
@@ -1171,23 +1225,52 @@ test('设置面板里「状态标记」是开关：关=经典三点，开=Claude
   }
 });
 
-test('状态标记开关不位移：标签定宽，换文案时轨道不跳', () => {
+test('开关不位移：状态词住在左标题列，开关只剩固定轨道', () => {
   const view = render({
     partial: { turn: 2, step: 0, blocks: [{ kind: 'reasoning', text: '看看配置' }] },
     runningCalls: [],
     nodes: [],
   });
-  const switches = [];
-  const walk = (node) => {
+  const switchNodes = [];
+  const stateNodes = [];
+  const strayLabels = [];
+  const walk = (node, inText) => {
     if (!node || typeof node !== 'object') return;
-    if (node.props && typeof node.props.className === 'string'
-      && node.props.className.split(/[ 	]+/).includes('pgc-switch')) switches.push(node.props.className);
-    (node.children || []).forEach(walk);
+    const cls = node.props && typeof node.props.className === 'string'
+      ? node.props.className.split(/\s+/)
+      : [];
+    if (cls.includes('pgc-switch')) switchNodes.push(node);
+    if (cls.includes('pgc-set-state')) stateNodes.push({ node, inText });
+    if (cls.includes('pgc-switch-label')) strayLabels.push(node);
+    (node.children || []).forEach((child) => walk(child, inText || cls.includes('pgc-set-text')));
   };
-  walk(view);
-  assert.ok(switches.includes('pgc-switch pgc-switch--wide'), '状态标记那颗开关带定宽类');
-  assert.equal(switches.filter((c) => c.includes('pgc-switch--wide')).length, 1, '只有它需要定宽');
-  assert.match(sheet, /\.pgc-switch--wide \.pgc-switch-label \{ min-width: [0-9.]+em/, '标签定宽，换文案时轨道不左右跳');
+  walk(view, false);
+
+  // 结构：文字全在左列，开关里只有轨道 + 滑块。
+  assert.equal(switchNodes.length, 3, '面板里三颗开关：状态标记 / 显示俏皮词 / 思考原话');
+  assert.equal(strayLabels.length, 0, '开关里不再有 .pgc-switch-label 文字节点');
+  assert.equal(stateNodes.length, 3, '每颗开关配一个左侧状态词');
+  assert.deepEqual(stateNodes.map(({ node }) => text(node)), ['经典三点', '开', '关']);
+
+  switchNodes.forEach((node, i) => {
+    assert.equal(node.children.length, 1, '开关只剩轨道，文字不再进按钮');
+    const [track] = node.children;
+    assert.match(track.props.className, /\bpgc-switch-track\b/, '子节点是轨道');
+    assert.match(track.children[0].props.className, /\bpgc-switch-thumb\b/, '轨道里是滑块');
+    assert.ok(!String(node.props.className).includes('--wide'), '不再用 wide 定宽补丁');
+    // 读屏：状态词进 aria-label，开没开看 aria-checked。
+    assert.ok(node.props['aria-label'].endsWith('：' + text(stateNodes[i].node)), 'aria-label 带状态词');
+    assert.ok(node.props['aria-checked'] === 'true' || node.props['aria-checked'] === 'false', 'aria-checked 保留');
+    // 文案再长也推不动开关：状态词在 .pgc-set-text 里，宽度由 CSS 写死。
+    assert.ok(stateNodes[i].inText, '状态词在左侧标题列 .pgc-set-text 内');
+  });
+
+  // CSS：状态词样式在；wide / label 补丁彻底删掉；轨道尺寸写死。
+  assert.match(sheet, /\.pgc-set-state \{ font-size: 11px; line-height: 1\.5; color: var\(--dsw-alias-label-secondary, currentColor\); opacity: \.85; \}/,
+    '状态词 11px 灰字');
+  assert.match(sheet, /\.pgc-switch \{[^}]*flex: 0 0 auto/, '开关不参与伸缩');
+  assert.match(sheet, /\.pgc-switch-track \{[^}]*width: 30px; height: 18px/, '轨道恒 30×18');
+  assert.doesNotMatch(sheet, /pgc-switch--wide|pgc-switch-label/, 'wide 与 label 规则一并删除');
 });
 
 test('自定义取色：选了「自定义」才出现渐变方框，平时不占地方', () => {
@@ -1667,7 +1750,7 @@ test('俏皮词真的画得出来：思考时挂着，且不会被主文案挤�
   assert.ok(text(flavors[0]).trim().length > 0, '俏皮词不能是空的');
 });
 
-test('俏皮词换词是「滚」不是「闪」：外壳不动，只有里面两行字在滚', () => {
+test('俏皮词换词是「滚」不是「闪」：胶囊外壳不动，只有两层词向上滚', () => {
   const view = render({
     partial: { turn: 3, step: 0, blocks: [{ kind: 'reasoning', text: '我先读取配置文件 package.json' }] },
     runningCalls: [],
@@ -1682,47 +1765,56 @@ test('俏皮词换词是「滚」不是「闪」：外壳不动，只有里面�
   };
   walk(view);
   assert.ok(flavor, '要有俏皮词');
-  const track = (flavor.children || []).filter(Boolean)[0];
-  assert.ok(track, '滚槽里要有一条履带');
-  assert.match(track.props.className, /pgc-flavor-track/, '滚槽里只放那条履带，不直接放字');
-  assert.match(track.props.className, /pgc-flavor-still/, '首帧还没有「上一句」，不要滚，只淡入');
+  const layers = (flavor.children || []).filter(Boolean);
+  assert.equal(layers.length, 1, '首帧只有当前词；旧词只在 140ms 过渡里存在');
+  assert.equal(layers[0].props.className, 'pgc-flavor-cur pgc-flavor-still', '静态的当前词撑起胶囊，首帧不滚');
+  assert.ok(String(text(layers[0])).trim().length > 0, '当前词不能是空的');
 
-  const lines = (track.children || []).filter(Boolean);
-  assert.equal(lines.length, 2, '履带上是两行：上一句在上、新的一句在下');
-  assert.ok(lines.every((c) => /pgc-flavor-line/.test(c.props.className)), '履带里只放行');
-  assert.equal(lines[0].props['aria-hidden'], true, '上一句别让读屏念第二遍');
-  assert.ok(!lines[1].props['aria-hidden'], '下面那行才是当前这句');
-  assert.ok(String(text(lines[1])).trim().length > 0, '当前这一行不能是空的');
-
-  // 外壳是滚槽：固定高度 + 裁切，换词时底色和宽度一像素都不动。
+  // 外壳是固定胶囊：宽度写死、裁切，换词时底色和位置一像素都不动。
   const shell = /\.pgc-flavor \{([\s\S]*?)\}/.exec(sheet);
   assert.ok(shell, '要有 .pgc-flavor 规则');
-  assert.match(shell[1], /overflow: hidden/, '滚槽要裁掉滚出去的那半句');
-  assert.match(shell[1], /position: relative/, '履带靠它绝对定位');
+  assert.match(shell[1], /overflow: hidden/, '胶囊要裁掉滚出去的那半句');
+  assert.match(shell[1], /position: relative/, '两层词靠它定位');
+  assert.match(shell[1], /width: 6\.6em/, '定宽，换词不推挤左边');
   assert.match(shell[1], /height: [\d.]+em/, '高度锁死，换词不撑高');
-  assert.doesNotMatch(shell[1], /animation:/, '外壳不许再挂动画（原来整颗胶囊跟着闪）');
+  assert.match(shell[1], /mask-image/, '两端渐隐留在外壳上');
+  assert.doesNotMatch(shell[1], /animation:/, '外壳不许挂动画');
 
-  // 一条履带整体滚半格：两行永远只差一行，不会中途叠在一起。
-  const trk = /\.pgc-flavor-track \{([\s\S]*?)\}/.exec(sheet);
-  assert.ok(trk, '要有 .pgc-flavor-track 规则');
-  assert.match(trk[1], /height: 200%/, '履带两行高，滚半格＝滚一行');
-  assert.match(trk[1], /flex-direction: column/, '两行竖着叠');
-  assert.match(trk[1], /animation: pgc-flavor-roll/, '换词动画挂在履带上，不挂在行上');
-  assert.match(trk[1], /transform: translateY\(-50%\)/, '默认停在下面那行：动画关掉时不会停在上一句');
-  assert.doesNotMatch(trk[1], /\b(width|margin|padding|top|left|right|bottom):.*\b(px|em)\b\s*;[\s\S]*animation/,
-    '只许动 transform，不许推挤排版');
+  // cur 静态撑高，prev 绝对定位叠在上面；两层都只裁自己的文字。
+  const cur = /\.pgc-flavor-cur \{([\s\S]*?)\}/.exec(sheet);
+  assert.ok(cur, '要有 .pgc-flavor-cur 规则');
+  assert.match(cur[1], /position: static/, '当前词参与排版、撑住胶囊');
+  const prev = /\}\n\.pgc-flavor-prev \{([\s\S]*?)\}/.exec(sheet);
+  assert.ok(prev, '要有 .pgc-flavor-prev 规则');
+  assert.match(prev[1], /position: absolute/, '旧词不参与撑高');
+  assert.match(prev[1], /inset: 0/, '旧词严格盖在当前词同一位置');
+  assert.match(prev[1], /pointer-events: none/, '旧词不挡鼠标');
 
-  const line = /\.pgc-flavor-line \{([\s\S]*?)\}/.exec(sheet);
-  assert.ok(line, '要有 .pgc-flavor-line 规则');
-  assert.match(line[1], /flex: 0 0 50%/, '每行正好半条履带＝一格');
+  // 两条动画同时走完：新词从下 60% 顶上来，旧词往上 60% 滚出去。
+  const rollIn = /@keyframes pgc-flavor-in \{([\s\S]*?)\n\}/.exec(sheet);
+  const rollOut = /@keyframes pgc-flavor-out \{([\s\S]*?)\n\}/.exec(sheet);
+  assert.ok(rollIn, '要有新词滚入的 pgc-flavor-in');
+  assert.ok(rollOut, '要有旧词滚出的 pgc-flavor-out');
+  assert.match(rollIn[1], /opacity: 0/);
+  assert.match(rollIn[1], /translateY\(60%\)/);
+  assert.match(rollOut[1], /opacity: 0/);
+  assert.match(rollOut[1], /translateY\(-60%\)/);
+  for (const rule of [rollIn[1], rollOut[1]]) {
+    assert.doesNotMatch(rule, /\b(width|height|margin|padding|top|left|right|bottom):/, '只许动透明度/位移');
+  }
+  assert.match(sheet, /\.pgc-anim-calm \.pgc-flavor-cur:not\(\.pgc-flavor-still\),\s*\n\s*\.pgc-anim-sweep \.pgc-flavor-cur:not\(\.pgc-flavor-still\) \{ animation: pgc-flavor-in 140ms cubic-bezier\(\.22, \.9, \.3, 1\) both; \}/);
+  assert.match(sheet, /\.pgc-anim-calm \.pgc-flavor-prev,\s*\n\s*\.pgc-anim-sweep \.pgc-flavor-prev \{ animation: pgc-flavor-out 140ms cubic-bezier\(\.22, \.9, \.3, 1\) both; \}/);
+  assert.match(sheet, /\.pgc-flavor-still \{ animation: none; \}/, '首帧不滚');
+});
 
-  assert.match(sheet, /\.pgc-flavor-still \{ animation: none; \}/, '首帧那条不滚');
-
-  const kf = /@keyframes pgc-flavor-roll \{([\s\S]*?)\n\}/.exec(sheet);
-  assert.ok(kf, '要有换词关键帧');
-  assert.match(kf[1], /from \{ transform: translateY\(0\)/, '起点露出上一句');
-  assert.match(kf[1], /to \{ transform: translateY\(-50%\)/, '终点露出新的一句');
-  assert.doesNotMatch(kf[1], /\b(width|height|margin|padding|top|left|right|bottom):/, '只许动 transform');
+test('俏皮词两层的状态：同一句不重建，换词时上一句进 prev，最多两层', () => {
+  const initial = { cur: '琢磨中', prev: null };
+  assert.equal(__test.nextFlavorLayers(initial, '琢磨中'), initial, '同一句原样返回，不重建层');
+  assert.deepEqual(__test.nextFlavorLayers(initial, '盘算中'),
+    { cur: '盘算中', prev: '琢磨中' }, '换词时上一句进 prev');
+  const switched = __test.nextFlavorLayers(initial, '盘算中');
+  assert.deepEqual(Object.keys(switched).sort(), ['cur', 'prev'], '任何时刻最多只有当前 + 上一句两层');
+  assert.equal(__test.FLAVOR_ROLL_MS, 140, '旧词只活一个动画时长');
 });
 
 test('有俏皮词时让位给词，没词时显示「进行中」，俏皮词固定在最右', () => {

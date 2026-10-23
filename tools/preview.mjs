@@ -17,10 +17,11 @@ const end = source.indexOf('`;', start);
 if (start < 0 || end < 0) throw new Error('client.js 里找不到 CSS 模板字符串');
 const css = source.slice(start + 'const CSS = `'.length, end);
 
-const row = (name, control, desc = '') => `
+const row = (name, control, desc = '', state = '') => `
             <label class="pgc-set-row">
               <span class="pgc-set-text">
                 <span class="pgc-set-name">${name}</span>
+                ${state ? `<span class="pgc-set-state">${state}</span>` : ''}
                 ${desc ? `<span class="pgc-set-desc">${desc}</span>` : ''}
               </span>
               ${control}
@@ -44,10 +45,9 @@ const sheet = (open) => `
                 <button type="button" class="pgc-seg-btn" data-on="true">安静</button>
                 <button type="button" class="pgc-seg-btn" data-on="false">扫光</button>
               </span>`)}${row('状态标记', `
-              <button type="button" class="pgc-switch" role="switch" data-on="false" aria-checked="false">
+              <button type="button" class="pgc-switch" role="switch" data-on="false" aria-checked="false" aria-label="状态标记：经典三点">
                 <span class="pgc-switch-track"><span class="pgc-switch-thumb"></span></span>
-                <span class="pgc-switch-label">经典三点</span>
-              </button>`, '打开后，标记按 Claude 的弹跳 / 斜线 / 绕圈轮换。')}${row('字幕条颜色', `
+              </button>`, '打开后，标记按 Claude 的弹跳 / 斜线 / 绕圈轮换。', '经典三点')}${row('字幕条颜色', `
               <span class="pgc-swatches" role="group">
                 <button type="button" class="pgc-swatch pgc-swatch--auto" data-on="false" title="跟随主题">A</button>
                 <button type="button" class="pgc-swatch" data-on="true" title="DS 蓝" style="--pgc-sw:#4d6bfe"></button>
@@ -62,19 +62,17 @@ const sheet = (open) => `
                 <button type="button" class="pgc-seg-btn" data-on="true">渐隐</button>
                 <button type="button" class="pgc-seg-btn" data-on="false">实心</button>
               </span>`)}${row('显示俏皮词', `
-              <button type="button" class="pgc-switch" role="switch" data-on="true" aria-checked="true">
+              <button type="button" class="pgc-switch" role="switch" data-on="true" aria-checked="true" aria-label="显示俏皮词：开">
                 <span class="pgc-switch-track"><span class="pgc-switch-thumb"></span></span>
-                <span class="pgc-switch-label">开</span>
-              </button>`)}${row('思考原话', `
-              <button type="button" class="pgc-switch" role="switch" data-on="false" aria-checked="false">
+              </button>`, '', '开')}${row('思考原话', `
+              <button type="button" class="pgc-switch" role="switch" data-on="false" aria-checked="false" aria-label="思考原话：关">
                 <span class="pgc-switch-track"><span class="pgc-switch-thumb"></span></span>
-                <span class="pgc-switch-label">关</span>
-              </button>`, '打开后，主文案下面多一行模型自己写的思考首句')}
+              </button>`, '打开后，主文案下面多一行模型自己写的思考首句', '关')}
           </div>
         </div>
       </div>`;
 
-const flavor = (word) => `<span class="pgc-flavor"><span class="pgc-flavor-track pgc-flavor-still"><span class="pgc-flavor-line" aria-hidden="true">${word}</span><span class="pgc-flavor-line">${word}</span></span></span>`;
+const flavor = (word, prev = '') => `<span class="pgc-flavor"><span class="pgc-flavor-cur${prev ? '' : ' pgc-flavor-still'}">${word}</span>${prev ? `<span class="pgc-flavor-prev" aria-hidden="true">${prev}</span>` : ''}</span>`;
 
 // 三点装载器 —— 和 client.js 里的 JSX 一模一样。
 const LOADER = `<span class="pgc-loader" data-pgc-shape="bounce" aria-hidden="true"><span class="pgc-dot"></span><span class="pgc-dot"></span><span class="pgc-dot"></span><span class="pgc-dot"></span></span>`;
@@ -104,19 +102,19 @@ ${handle}
 ${strip('running', `
           <span class="pgc-step">第 3 步</span>
           ${LOADER}
-          <span class="pgc-label">正在执行命令 npm test</span>
+          <span class="pgc-label"><span class="pgc-label-cur">正在执行命令 npm test</span></span>
           <span class="pgc-slot" aria-hidden="true"><span class="pgc-arc"><span></span><span></span><span></span></span></span>
           ${flavor('琢磨中')}`)}
 ${strip('ok', `
           <span class="pgc-step">第 4 步</span>
           ${LOADER}
-          <span class="pgc-label">命令完成 npm test</span>
+          <span class="pgc-label"><span class="pgc-label-cur">命令完成 npm test</span></span>
           <span class="pgc-chip">成功</span>
           <span class="pgc-slot" aria-hidden="true"><span class="pgc-arc"><span></span><span></span><span></span></span></span>`)}
 ${strip('error', `
           <span class="pgc-step">第 5 步</span>
           ${LOADER}
-          <span class="pgc-label">命令执行失败（exit code 1）</span>
+          <span class="pgc-label"><span class="pgc-label-cur">命令执行失败（exit code 1）</span></span>
           <span class="pgc-chip">失败</span>
           <span class="pgc-slot" aria-hidden="true"><span class="pgc-arc"><span></span><span></span><span></span></span></span>`, `
         <details class="pgc-detail">
@@ -126,13 +124,16 @@ ${strip('error', `
 ${strip('thinking', `
           <span class="pgc-step">第 2 步</span>
           ${LOADER}
-          <span class="pgc-text"><span class="pgc-label">翻一下配置文件</span></span>
+          <span class="pgc-text"><span class="pgc-label"><span class="pgc-label-cur">翻一下配置文件</span></span></span>
           ${flavor('酝酿中')}`)}
 ${strip('thinking', `
           <span class="pgc-step">第 6 步</span>
           ${LOADER}
           <span class="pgc-text">
-            <span class="pgc-label">看看配置里怎么写的</span>
+            <span class="pgc-label">
+              <span class="pgc-label-cur">看看配置里怎么写的</span>
+              <span class="pgc-label-prev" aria-hidden="true">翻一下配置文件</span>
+            </span>
             <span class="pgc-sub-wrap pgc-sub-wrap--on"><span class="pgc-sub">先看 package.json 的入口，再决定改哪里</span></span>
           </span>
           <span class="pgc-slot" aria-hidden="true"><span class="pgc-arc"><span></span><span></span><span></span></span></span>
@@ -141,7 +142,7 @@ ${strip('thinking', `
           <span class="pgc-step">第 8 步</span>
           ${LOADER}
           <span class="pgc-text">
-            <span class="pgc-label">扫光档：光带横扫整条字幕</span>
+            <span class="pgc-label"><span class="pgc-label-cur">扫光档：光带横扫整条字幕</span></span>
             <span class="pgc-sub-wrap pgc-sub-wrap--on"><span class="pgc-sub">第二行也跟着一起扫，不是只扫第一行</span></span>
           </span>
           <span class="pgc-slot" aria-hidden="true"><span class="pgc-arc"><span></span><span></span><span></span></span></span>
@@ -149,16 +150,16 @@ ${strip('thinking', `
 ${strip('thinking', `
           <span class="pgc-step">第 7 步</span>
           ${LOADER}
-          <span class="pgc-text"><span class="pgc-label">npm test 跑完了 · 1.2s</span></span>
-          ${flavor('缓口气')}`)}
+          <span class="pgc-text"><span class="pgc-label"><span class="pgc-label-cur">npm test 跑完了 · 1.2s</span></span></span>
+          ${flavor('缓口气', '盘算中')}`)}
 ${strip('thinking', `
           <span class="pgc-step">第 9 步</span>
           ${LOADER}
-          <span class="pgc-label">俏皮词样子：实心（一块底色 + 白字）</span>
+          <span class="pgc-label"><span class="pgc-label-cur">俏皮词样子：实心（一块底色 + 白字）</span></span>
           ${flavor('琢磨中')}`, '', 'calm', 'solid')}
       <div class="pgc-summary"><span class="pgc-summary-text">本回合 · 3 次工具 · 2 成 1 败 · 用时 12.4s</span></div>
     </div>
-    <p class="doc">主文案是一整句（动作 + 具体对象），左侧是三颗接力跳的点（进行中），右侧是俏皮词（两端渐隐的滚槽，没有封闭边框）。最下面一条是空闲齿轮 + 展开的设置面板。</p>
+    <p class="doc">主文案是一整句（动作 + 具体对象），换句时新旧两层交叉淡入 90ms（第二张思考样例里叠着上一句）。左侧是三颗接力跳的点（进行中），右侧是俏皮词（两端渐隐的滚槽，没有封闭边框），换词时新词从下面滚上来、旧词往上滚出去，各 140ms（第 7 条样例里叠着上一句）。最下面一条是空闲齿轮 + 展开的设置面板。</p>
   </section>`;
 
 const html = `<!doctype html>

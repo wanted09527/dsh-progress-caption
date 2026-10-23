@@ -48,6 +48,13 @@ window.__ModuleLoader__.load({
     const LABEL_HOLD_MS = 520;
     /** 思考特别快时的稳定窗口：一秒钟最多换一次多一点，人眼跟得上。 */
     const LABEL_HOLD_FAST_MS = 800;
+    /** 换文案交叉淡入的时长：旧句淡出、新句淡入同时进行，90ms 后旧句摘掉。
+     *  只动 opacity / transform，旧句绝对定位、不参与撑高，所以这两层同时在的
+     *  90ms 里整条字幕的高度一像素都不变。 */
+    const LABEL_FADE_MS = 90;
+    /** 俏皮词换词的滚动时长：新词从下面顶上来、旧词从上面滚出去，各 140ms。
+     *  只动 opacity / transform；旧词绝对定位叠在胶囊里，不参与撑高，所以外壳不动。 */
+    const FLAVOR_ROLL_MS = 140;
     /** 每秒新增多少个字就算「思考很快」。 */
     const FAST_CPS = 40;
     /** 成功态停留多久后收起（失败态不自动收，留着让人看原因）。 */
@@ -1345,16 +1352,37 @@ window.__ModuleLoader__.load({
     }
 
     /**
-     * 设置面板里的一行：左边标题（可带一行小字说明），右边控件。
+     * 设置面板里的一行：左边标题列（标题 + 可选状态词 + 可选说明），右边控件。
      * 照官方 / Claude 设置页的两栏 row 做，行间用细分隔线分组，
      * 所以面板里不再有「长什么样 / 颜色 / 说什么」那种大字分组标题。
+     *
+     * state 是开关的当前状态词（「开 / 关」「经典三点 / Claude 三态」）。
+     * 它以前画在开关轨道右边，文字一变长整颗开关就被推着走；现在钉在左侧
+     * 标题列的第二行，开关只剩一条固定 30px 的轨道，换什么文案都不动。
      */
-    function settingRow(t, labelKey, control, hintKey) {
+    function settingRow(t, labelKey, control, hintKey, state) {
       return h('label', { className: 'pgc-set-row', key: labelKey },
         h('span', { className: 'pgc-set-text' },
           h('span', { className: 'pgc-set-name' }, t(labelKey)),
+          state ? h('span', { className: 'pgc-set-state' }, state) : null,
           hintKey ? h('span', { className: 'pgc-set-desc' }, t(hintKey)) : null),
         control);
+    }
+
+    /**
+     * 主文案两层的纯状态转移：label 变了就把上一句留作 prev，同一句则原样返回。
+     * 组件在渲染期调它，新旧两层从同一次提交开始就在一起；抽成纯函数也方便离线测。
+     */
+    function nextLabelLayers(layers, label) {
+      return layers.cur === label ? layers : { cur: label, prev: layers.cur };
+    }
+
+    /**
+     * 俏皮词两层的纯状态转移：词变了就把上一句留作 prev，同一句原样返回。
+     * 和主文案共用一套「渲染期切层」的思路，只是时长/位移幅度不同。
+     */
+    function nextFlavorLayers(layers, word) {
+      return layers.cur === word ? layers : { cur: word, prev: layers.cur };
     }
 
     /**
@@ -1557,10 +1585,43 @@ window.__ModuleLoader__.load({
         const timer = setTimeout(() => setLabel(candidate), holdMs);
         return () => clearTimeout(timer);
       }, [candidate, label, holdMs]);
+
+      // 主文案交叉淡入：记住上一句，切换后让新旧两层同时在 90ms 内走完。
+      // 这里用「渲染期条件 setState」而不是 useEffect：effect 在 paint 之后才跑，
+      // 会先画出一帧「新句已经淡入、旧句还没挂上」的空档（90ms 动画里那一帧很显眼）。
+      // 在同一个组件里条件式地更新自己，React 会在本次提交前同步重渲染，
+      // 新句和旧句从第一帧起就在一起。条件更新后 cur 追平 label，不会循环。
+      const [labelLayers, setLabelLayers] = React.useState({ cur: label, prev: null });
+      if (labelLayers.cur !== label) {
+        setLabelLayers(nextLabelLayers(labelLayers, label));
+      }
+      // 90ms 一到就把旧句摘掉：旧句只在过渡期间存在，平时树里只有一句。
+      // 前几步（settling）由渲染处直接不挂旧句，保持原来的硬切换。
+      React.useEffect(() => {
+        if (!labelLayers.prev) return undefined;
+        const timer = setTimeout(() => {
+          setLabelLayers((layers) => (layers.prev ? { cur: layers.cur, prev: null } : layers));
+        }, LABEL_FADE_MS);
+        return () => clearTimeout(timer);
+      }, [labelLayers]);
       // 有事实标签时，俏皮词退到后面当陪衬；已经拼进主文案了就别再重复一遍。
       // 事实标签在场时它一定挂着（不再看「是不是正在思考」），这样它有个固定位置，
       // 不会一会儿出现一会儿被主文案顶掉，看起来就不会「抢位置」。
       const suffix = settings.words && flavor && candidate.indexOf(flavor) < 0 ? flavor : null;
+
+      // 俏皮词滚动：和主文案一样在渲染期切层，避免 useEffect 晚一帧、旧词先消失。
+      // 旧词只活 FLAVOR_ROLL_MS（140ms），到点从树里摘掉，平时胶囊里只有一个词层。
+      const [flavorLayers, setFlavorLayers] = React.useState({ cur: suffix, prev: null });
+      if (flavorLayers.cur !== suffix) {
+        setFlavorLayers(nextFlavorLayers(flavorLayers, suffix));
+      }
+      React.useEffect(() => {
+        if (!flavorLayers.prev) return undefined;
+        const timer = setTimeout(() => {
+          setFlavorLayers((layers) => (layers.prev ? { cur: layers.cur, prev: null } : layers));
+        }, FLAVOR_ROLL_MS);
+        return () => clearTimeout(timer);
+      }, [flavorLayers]);
 
       // 成功态停留几秒就收；失败态留着，等人看完原因或开下一轮。
       const [gone, setGone] = React.useState(false);
@@ -1619,13 +1680,6 @@ window.__ModuleLoader__.load({
       const pinnedStep = shown && typeof shown.step === 'number' ? shown.step : stepRef.current.step;
       // 整轮最前面这几步状态翻得最勤：不播任何淡入，纯硬切换，把「闪」从根上掐掉。
       const settling = typeof pinnedStep === 'number' && pinnedStep <= SETTLE_STEPS;
-      // 俏皮词换词要「滚上去」：得同时留着上一句，让它往上滚出去，新的一句从底下顶上来。
-      // 这里在渲染期记住「上一个是哪句」——写两遍结果一样，所以重复渲染也不会错位。
-      const flavorRef = React.useRef({ cur: suffix, prev: null });
-      if (flavorRef.current.cur !== suffix) {
-        flavorRef.current = { cur: suffix, prev: flavorRef.current.cur };
-      }
-      const flavorPrev = flavorRef.current.prev;
 
       const status = !shown
         ? ''
@@ -1674,8 +1728,6 @@ window.__ModuleLoader__.load({
         onClick: () => onChange(key),
       }, table[key].value ? '' : key === 'custom' ? '◍' : 'A')));
 
-      // 第四参 wide：标签文字会随开关状态变长（「经典三点」↔「Claude 三态」），
-      // 不定宽的话整颗开关会左右跳一格。定宽后轨道位置钉住不动。
       // 自定义取色：横向是色相，纵向是明度。点哪儿取哪儿，松手写进设置。
       // 只在选中「自定义」时才出现，平时不占地方。
       const customPicker = (value, onChange) => h('div', {
@@ -1694,17 +1746,27 @@ window.__ModuleLoader__.load({
         },
       }, h('span', { className: 'pgc-picker-mark' }));
 
-      const switchButton = (on, label, hint, flip, wide) => h('button', {
+      // 三颗开关共用的状态词：只在这里算一次，左边标题列和 aria-label 都用它。
+      // 这样「开 / 关」「经典三点 / Claude 三态」不会因为两处各写一遍而对不上。
+      const motionOn = settings.motion === 'claude';
+      const motionState = t(motionOn ? 'motionClaude' : 'motionPlain');
+      const wordsState = t(settings.words ? 'wordsOn' : 'wordsOff');
+      const subLineState = t(settings.subLine ? 'wordsOn' : 'wordsOff');
+
+      // 开关只画轨道 + 滑块，状态文字不进按钮（见 settingRow 的 state 参数）。
+      // 文字一长就推动开关的问题从结构上消失：轨道恒 30px，和文案长度无关。
+      // 读屏靠 aria-label（行标题 + 状态词）+ aria-checked 仍能分清「哪个开关、开没开」。
+      const switchButton = (on, name, state, hint, flip) => h('button', {
         type: 'button',
-        className: 'pgc-switch' + (wide ? ' pgc-switch--wide' : ''),
+        className: 'pgc-switch',
         role: 'switch',
         'aria-checked': on ? 'true' : 'false',
+        'aria-label': name + '：' + state,
         'data-on': on ? 'true' : 'false',
-        title: hint || label,
+        title: hint || name + '：' + state,
         onClick: flip,
       }, h('span', { className: 'pgc-switch-track' },
-        h('span', { className: 'pgc-switch-thumb' })),
-        h('span', { className: 'pgc-switch-label' }, label));
+        h('span', { className: 'pgc-switch-thumb' })));
 
       // 面板常驻 DOM（收起时只改变透明度和位移），点齿轮开合，展开有过渡动画。
       const settingsPanel = h('div', { className: 'pgc-settings' },
@@ -1746,13 +1808,14 @@ window.__ModuleLoader__.load({
             // 状态标记是开关：关＝经典三点，开＝Claude 三态。
             // 以前是分段控件写两个名字，看着像「两个都要」，其实只能选一个。
             // 说明从独立的一段小字挪进行里：左标题下面一行 11px 灰字。
+            // 状态词也在左边标题列（第二行），开关本体只剩轨道。
             settingRow(t, 'motion', switchButton(
-              settings.motion === 'claude',
-              t(settings.motion === 'claude' ? 'motionClaude' : 'motionPlain'),
+              motionOn,
+              t('motion'),
+              motionState,
               '',
-              () => update({ motion: settings.motion === 'claude' ? 'plain' : 'claude' }),
-              true,
-            ), 'motionHint'),
+              () => update({ motion: motionOn ? 'plain' : 'claude' }),
+            ), 'motionHint', motionState),
             settingRow(t, 'colorAccent', swatches('accent', settings.accent, ACCENTS, (value) => update({ accent: value }))),
             settings.accent === 'custom'
               ? h('div', { className: 'pgc-picker-row' }, customPicker(settings.accentCustom, (value) => update({ accentCustom: value })))
@@ -1761,8 +1824,8 @@ window.__ModuleLoader__.load({
               { value: 'tint', label: 'toneTint' },
               { value: 'solid', label: 'toneSolid' },
             ], (value) => update({ flavorStyle: value }))),
-            settingRow(t, 'words', switchButton(settings.words, settings.words ? t('wordsOn') : t('wordsOff'), '', () => update({ words: !settings.words }))),
-            settingRow(t, 'subLine', switchButton(settings.subLine, settings.subLine ? t('wordsOn') : t('wordsOff'), '', () => update({ subLine: !settings.subLine })), 'subLineHint'))));
+            settingRow(t, 'words', switchButton(settings.words, t('words'), wordsState, '', () => update({ words: !settings.words })), null, wordsState),
+            settingRow(t, 'subLine', switchButton(settings.subLine, t('subLine'), subLineState, '', () => update({ subLine: !settings.subLine })), 'subLineHint', subLineState))));
 
       // 注意：这里不再「有字幕就返回整条、没字幕就返回把手」两套结构。
       // 两套结构会让 React 把整棵子树卸载重建，看起来就是闪一下、没有过渡。
@@ -1819,10 +1882,16 @@ window.__ModuleLoader__.load({
                 h('span', { className: 'pgc-dot' }),
                 h('span', { className: 'pgc-dot' }),
                 h('span', { className: 'pgc-dot' })),
-              // 加 key 让「换文案」重挂载一次，淡入才会重播；label 已经被 holdMs
-              // 稳定过（最快 520ms / 快思考 800ms 才换一次），比 160ms 的动画长，不会连成闪烁。
+              // 换文案：外层只负责定位 / 裁切，静态的 .pgc-label-cur 撑高；
+              // 旧句 .pgc-label-prev 绝对定位叠在上面，不参与布局。
+              // cur 换 key 才会重播 90ms 淡入；prev 只在过渡期存在，到点由 LABEL_FADE_MS 清掉。
+              // 前几步（settling）不挂旧句，保持原来的硬切换。
               h('span', { className: 'pgc-text' },
-                h('span', { className: 'pgc-label', key: label }, label),
+                h('span', { className: 'pgc-label' },
+                  h('span', { className: 'pgc-label-cur', key: 'cur:' + label }, label),
+                  !settling && labelLayers.prev
+                    ? h('span', { className: 'pgc-label-prev', key: 'prev:' + labelLayers.prev, 'aria-hidden': true }, labelLayers.prev)
+                    : null),
                 // 「思考原话」那一行。外面这层 .pgc-sub-wrap 是「高度闸门」：
                 // 副行有没有内容都常驻，靠 max-height 0 → 1.6em 过渡来开关。
                 // 以前是直接挂/摘 .pgc-sub，盒子高度会在一帧里多出 13px，
@@ -1847,20 +1916,23 @@ window.__ModuleLoader__.load({
               }, h('span', { className: 'pgc-arc' },
                 [0, 1, 2].map((i) => h('span', { key: i })))),
               // 俏皮词放最右端：它只是气氛，不属于左边那句状态描述。
-              // 换词时胶囊底色不动，只有里面那条「两行字的履带」整体往上滚半格：
-              // 上一句滚出框、新的一句顶到中间停住。
-              // 原来是把整个胶囊重挂载一次、从 45% 透明度浮上来 —— 每 2.8 秒连底色跟着闪一下，
-              // 那是「生硬」的来源。
+              // 换词时胶囊外壳（宽度 / 高度 / 底色 / 两端渐隐）一律不动，只有里面两层字：
+              // 新词从下面 60% 滚上来，旧词往上 60% 滚出去，各 140ms，方向始终向上。
+              // 旧词只活一个动画时长，之后摘掉；胶囊里任何时刻最多两个词层。
               suffix
                 ? h('span', { className: 'pgc-flavor' },
                   h('span', {
-                    // key 换掉 = 整条履带重新挂载 = 换词动画从 translateY(0) 重新滚一次。
-                    // 只有滚动体重挂载，胶囊外壳不动，所以底色和边框不会跟着闪。
-                    className: flavorPrev ? 'pgc-flavor-track' : 'pgc-flavor-track pgc-flavor-still',
-                    key: 'roll:' + suffix,
-                  },
-                    h('span', { className: 'pgc-flavor-line', 'aria-hidden': true }, flavorPrev || suffix),
-                    h('span', { className: 'pgc-flavor-line' }, suffix)))
+                    // 首帧还没有「上一句」，别滚：条本身已经在播入场动画，再滚一次就吵。
+                    className: 'pgc-flavor-cur' + (flavorLayers.prev ? '' : ' pgc-flavor-still'),
+                    key: 'flavor-cur:' + suffix,
+                  }, suffix),
+                  !settling && flavorLayers.prev
+                    ? h('span', {
+                      className: 'pgc-flavor-prev',
+                      key: 'flavor-prev:' + flavorLayers.prev,
+                      'aria-hidden': true,
+                    }, flavorLayers.prev)
+                    : null)
                 : null)
             : null,
           painted && showFull && painted.state === 'error' && painted.rawLine
@@ -1982,10 +2054,10 @@ window.__ModuleLoader__.load({
      时长压到 180ms 并把缓动换成强 ease-out，看上去是一口气收掉而不是慢慢挤。 */
   max-height: 7em; opacity: 1;
   /* 这里必须裁剪：收成齿轮、展开/收起时靠它把多出来的行藏住。
-     但裁剪框正好贴着内容高度时，入场/换词那 2px 的 translateY 会把右下角
+     但裁剪框正好贴着内容高度时，入场/换词那 3px 的 translateY 会把右下角
      （俏皮词胶囊的底边）切掉一条——一行时内容最矮，所以只有「一行」才看得见。
      解法：上下各加 6px 内边距把裁剪框撑开，再用 -6px 外边距抵回去，
-     外层占位高度一分不差，但裁剪框比内容高 12px，2px 的位移就切不到了。
+     外层占位高度一分不差，但裁剪框比内容高 12px，3px 的位移就切不到了。
      注意不能改成 overflow: visible —— 那样收起途中内容会从 0 高度的框里溢出去，
      压到上面那条排队消息上，就是「指令堆叠时显示异常」。 */
   padding-block: 6px; margin-block: -6px;
@@ -2143,18 +2215,27 @@ window.__ModuleLoader__.load({
 /* 副行本体：display: block 是必须的 —— 它现在被包在 .pgc-sub-wrap 里，不再是
    .pgc-text 的直接 flex 子项，若还是 inline 就吃不到 overflow/text-overflow 的省略号。 */
 .pgc-sub { display: block; flex: 0 0 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: .92em; line-height: 1.5; color: var(--dsw-alias-label-secondary, inherit); }
-.pgc-label { position: relative; flex: 0 0 auto; min-width: 0; overflow: hidden; display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 1; overflow-wrap: anywhere; }
-/* 文案换了才重播的淡入上浮：只动 opacity + translateY（合成层），不改宽高、不重排。
-   160ms 是「看得见但来不及拖沓」的量级；换文案的间隔由 holdMs 兜住，不会连成闪烁。
-   只在「安静 / 扫光」两档挂动画，「全静止」档连这个也关掉。 */
-.pgc-anim-calm .pgc-label,
-.pgc-anim-sweep .pgc-label { animation: pgc-swap .16s cubic-bezier(.23, 1, .32, 1) both; }
+/* 主文案：外层只负责定位和裁切；真正撑高的是静态的 .pgc-label-cur。
+   交叉淡入时旧句（.pgc-label-prev）绝对定位叠在上面，不参与撑高，
+   所以新旧两层同时在的那 90ms 里，整条字幕的高度一像素都不变。 */
+.pgc-label { position: relative; flex: 0 0 auto; min-width: 0; overflow: hidden; }
+.pgc-label-cur,
+.pgc-label-prev { min-width: 0; overflow-wrap: anywhere; display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 1; }
+.pgc-label-prev { position: absolute; inset: 0; pointer-events: none; }
+/* 换文案：新句从下 3px 淡入，旧句往上 3px 淡出，各 90ms，同时进行。
+   只碰 opacity / transform（合成层），不改宽高、不重排。
+   换句间隔由 holdMs 兜住（最快 520ms），90ms 的动画不会连成闪烁。 */
+.pgc-anim-calm .pgc-label-cur,
+.pgc-anim-sweep .pgc-label-cur { animation: pgc-label-in 90ms cubic-bezier(.23, 1, .32, 1) both; }
+.pgc-anim-calm .pgc-label-prev,
+.pgc-anim-sweep .pgc-label-prev { animation: pgc-label-out 90ms cubic-bezier(.23, 1, .32, 1) both; }
 /* 整轮最前面几步（≤ SETTLE_STEPS）一律硬切换：状态翻得最勤的就是这几步，
    淡入/上浮一秒能量播两三次，叠起来就是「一直在闪」。这一步只关「换文案」的动画，
    不动排版，也不关 .pgc-live 的入场动画——那个一次出现只播一次，不是闪烁来源。 */
 .pgc-strip--settle .pgc-flavor,
-.pgc-strip--settle .pgc-flavor-track,
-.pgc-strip--settle .pgc-label { animation: none; }
+.pgc-strip--settle .pgc-flavor-cur,
+.pgc-strip--settle .pgc-label,
+.pgc-strip--settle .pgc-label-cur { animation: none; }
 /* 扫光：整条字幕从左到右掠过一遍，光带铺满这个框的宽度。
    （原来是 40% 宽的光带只在第一行主文案里走，看起来是「中间闪一下」。）
    - 挂在一个铺满整条胶囊的覆盖层 .pgc-sweep 上，而不是 .pgc-band 上：
@@ -2202,8 +2283,9 @@ window.__ModuleLoader__.load({
 /* 俏皮词：不用斜体（中文被强行倾斜很难看），固定占最右一格。
    宽度写死 6.6em：词最短 3 字最长 5 字，写死之后换词时右边这块纹丝不动，
    左边的状态文字就不会被一会儿推左一会儿推右（这也是「闪」的一个来源）。
-   换词时外壳（宽度 / 高度 / 位置）一律不动，只有里面两行字在滚：
-   这个框就是那条「滚槽」，overflow: hidden 把滚出去的那半句裁掉。
+   换词时外壳（宽度 / 高度 / 位置 / 底色）一律不动，只有里面两层字：
+   新词从下面 60% 滚上来，旧词从原位往上 60% 滚出去。
+   这个框就是裁切框，overflow: hidden 把滚出胶囊的那半句切掉。
 
    默认这一档不再画「一圈」：没有底色、没有描边、没有圆角矩形。
    一圈封闭的框把词关在里面，怎么看都像个按钮，而且小字 + 细描边在深色主题下
@@ -2224,30 +2306,34 @@ window.__ModuleLoader__.load({
   mask-image: linear-gradient(90deg, transparent 0, #000 14%, #000 86%, transparent 100%);
   transition: color .18s ease, background-color .18s ease;
 }
-/* 滚槽里的滚动体：上一句在上、新的一句在下，两行竖直叠着，整体往上滚半格。
-   滚动体的高度是滚槽的两倍，所以「滚半格」正好等于「滚一行」——
-   任何一帧，两行之间的距离都恰好是一行，绝不会像各动各的那样在中间叠成一坨。
-   只动 transform，走合成层，不重排，也不推挤左边的主文案。 */
-.pgc-flavor-track {
-  position: absolute; left: 0; right: 0; top: 0; height: 200%;
-  display: flex; flex-direction: column;
-  /* 默认就停在下面那一行（新词）：动画被关掉时等于硬切换，不会停在上一句上。 */
-  transform: translateY(-50%);
-  animation: pgc-flavor-roll .42s cubic-bezier(.25, .46, .45, .94) both;
-}
-.pgc-flavor-line {
-  flex: 0 0 50%;
-  display: flex; align-items: center; justify-content: center;
+/* 两层词都居中放在胶囊里：cur 是静态层，正常参与排版、撑住胶囊的内容高度；
+   prev 绝对定位盖在同一位置，不参与撑高，所以两层同时在时外框一像素都不动。
+   两层都只裁自己的文字，不碰胶囊的宽高。 */
+.pgc-flavor-cur,
+.pgc-flavor-prev {
+  min-width: 0; max-width: 100%;
   overflow: hidden; white-space: nowrap; text-overflow: ellipsis;
 }
-/* 刚出现（还没有「上一句」）时不要滚：条本身已经在播入场动画，再滚一次就显得吵。 */
+.pgc-flavor-cur { position: static; display: block; }
+.pgc-flavor-prev {
+  position: absolute; inset: 0;
+  display: flex; align-items: center; justify-content: center;
+  pointer-events: none;
+}
+/* 换词：新词从下 60% 淡入到原位，旧词从原位往上 60% 淡出，各 140ms。
+   只动 opacity / transform，走合成层，不重排，也不推挤左边的主文案。
+   首帧（还没有上一句）挂 .pgc-flavor-still，不滚，只随整条入场。 */
+.pgc-anim-calm .pgc-flavor-cur:not(.pgc-flavor-still),
+.pgc-anim-sweep .pgc-flavor-cur:not(.pgc-flavor-still) { animation: pgc-flavor-in 140ms cubic-bezier(.22, .9, .3, 1) both; }
+.pgc-anim-calm .pgc-flavor-prev,
+.pgc-anim-sweep .pgc-flavor-prev { animation: pgc-flavor-out 140ms cubic-bezier(.22, .9, .3, 1) both; }
 .pgc-flavor-still { animation: none; }
 /* 俏皮词两种样式，两档必须一眼分得开：
    - tint（默认，无后缀同名规则）：两端渐隐的滚槽，没有底色也没有描边；
    - solid：想要「一块底」的选它，实心胶囊 + 白字，渐变遮罩必须关掉，
      否则胶囊两头会被啃成透明，就不是胶囊了。
    （第三档 plain「素色」已按用户要求删掉：它和默认档只差一个渐隐，纯粹是多余选项。）
-   换词动画挂在滚动体上（.pgc-flavor-track 自带 animation），外壳不再挂，
+   换词动画挂在词层上（cur / prev 各自一条），外壳不再挂，
    所以原来「每个词都连胶囊一起重挂载」的闪烁没有了。全静止档由后面的规则统一关掉。 */
 .pgc-flavor-solid .pgc-flavor {
   color: #fff; background: var(--pgc-accent);
@@ -2396,6 +2482,9 @@ window.__ModuleLoader__.load({
 .pgc-set-text { display: flex; flex-direction: column; gap: 2px; min-width: 0; flex: 1 1 auto; }
 .pgc-set-name { font-size: 12.5px; line-height: 1.45; color: var(--dsw-alias-label-primary, currentColor); }
 .pgc-set-desc { font-size: 11px; line-height: 1.5; color: var(--dsw-alias-label-secondary, currentColor); opacity: .78; }
+/* 开关的状态词（「开 / 关」「经典三点 / Claude 三态」）住在标题列第二行，
+   不再画进开关：文字再长也推不动右边那条轨道。 */
+.pgc-set-state { font-size: 11px; line-height: 1.5; color: var(--dsw-alias-label-secondary, currentColor); opacity: .85; }
 /* 控件一律贴右、与标题垂直居中；窄屏（<280px）整行换行后控件改贴左，
    免得它被 margin-left:auto 推到第二行最右端孤零零地挂着。 */
 .pgc-set-row > .pgc-seg,
@@ -2418,13 +2507,12 @@ window.__ModuleLoader__.load({
   background: color-mix(in srgb, var(--dsw-alias-brand-primary, #4f7cff) 20%, transparent);
   box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--dsw-alias-brand-primary, #4f7cff) 34%, transparent);
 }
-.pgc-switch--wide .pgc-switch-label { min-width: 5.4em; text-align: left; }
-.pgc-switch { display: inline-flex; align-items: center; gap: 7px; padding: 0; border: 0; background: transparent; color: var(--dsw-alias-label-secondary, currentColor); font: inherit; font-size: 11px; cursor: pointer; }
+/* 开关本体只有轨道：没有文字，就没有「文案变长把开关推走」这回事。 */
+.pgc-switch { display: inline-flex; align-items: center; flex: 0 0 auto; padding: 0; border: 0; background: transparent; color: var(--dsw-alias-label-secondary, currentColor); font: inherit; cursor: pointer; }
 .pgc-switch-track { position: relative; width: 30px; height: 18px; border-radius: 999px; background: color-mix(in srgb, currentColor 22%, transparent); transition: background-color .2s ease; }
 .pgc-switch-thumb { position: absolute; top: 2px; left: 2px; width: 14px; height: 14px; border-radius: 999px; background: #fff; box-shadow: 0 1px 3px rgba(0,0,0,.35); transition: transform .2s cubic-bezier(.3,.9,.3,1); }
 .pgc-switch[data-on='true'] .pgc-switch-track { background: var(--dsw-alias-brand-primary, #4f7cff); }
 .pgc-switch[data-on='true'] .pgc-switch-thumb { transform: translateX(12px); }
-.pgc-switch[data-on='true'] .pgc-switch-label { color: var(--dsw-alias-label-primary, currentColor); }
 .pgc-picker-row { padding: 2px 0 6px; }
 .pgc-picker {
   position: relative;
@@ -2448,14 +2536,22 @@ window.__ModuleLoader__.load({
    不留空轨（那看着像坏了），也不再压到 .45（静态下压暗等于没画）。 */
 .pgc-anim-off .pgc-label::after { content: none; animation: none; }
 /* 「全静止」档真的全静止：入场、换文案、换词都不动，只剩底色过渡（那不算动效）。 */
-.pgc-anim-off .pgc-live, .pgc-anim-off .pgc-label, .pgc-anim-off .pgc-flavor,
-.pgc-anim-off .pgc-flavor-track { animation: none; }
+.pgc-anim-off .pgc-live, .pgc-anim-off .pgc-label,
+.pgc-anim-off .pgc-label-cur, .pgc-anim-off .pgc-label-prev,
+.pgc-anim-off .pgc-flavor, .pgc-anim-off .pgc-flavor-cur,
+.pgc-anim-off .pgc-flavor-prev { animation: none; }
+/* 没有动画就别让旧层多挂一个动画时长：两层同时可见会叠成重影，直接只留新层。 */
+.pgc-anim-off .pgc-label-prev,
+.pgc-anim-off .pgc-flavor-prev { display: none; }
 @media (prefers-reduced-motion: reduce) {
   .pgc-strip, .pgc-strip * { animation: none !important; transition: none !important; }
   /* 面板也在 .pgc-strip 子树里，上面那条已覆盖到；这里单独再写一遍是给将来
      有人把面板挪出字幕条根节点时留的保险（红绿过渡、开合位移都属于动效）。 */
   .pgc-sheet, .pgc-sheet * { animation: none !important; transition: none !important; }
   .pgc-label::after { content: none !important; }
+  /* 减少动态效果：换文案、换俏皮词都直接切，旧层不叠在新层上。 */
+  .pgc-label-prev,
+  .pgc-flavor-prev { display: none !important; }
   /* 系统开了「减少动态效果」时，也不再做位移和缩放，只留颜色的硬切换。 */
   .pgc-band { max-height: 7em; opacity: 1; }
   .pgc-strip--handle .pgc-band { max-height: 0; opacity: 0; margin-block: 0; padding-block: 0; }
@@ -2472,19 +2568,28 @@ window.__ModuleLoader__.load({
   from { opacity: 0; transform: translateY(2px) scale(.984); }
   to { opacity: 1; transform: none; }
 }
-/* 换文案/换词用的：起点不是 0 而是 .45 —— 真的从 0 开始，每隔几百毫秒就有一次
-   「字消失再浮现」，看着就是闪。从 .45 起跳是「换了一句话」而不是「断了一下」。 */
-@keyframes pgc-swap {
-  from { opacity: .45; transform: translateY(2px); }
+/* 换文案的交叉淡入：新旧两层同时在，90ms 内一走一进。
+   只碰 opacity / transform，旧句绝对定位不撑高，所以整条字幕的高度始终不变。
+   起点用 0 不会闪，因为旧句同时还在淡出；前 3 步和减少动态效果时根本不做交叉。 */
+@keyframes pgc-label-in {
+  from { opacity: 0; transform: translateY(3px); }
   to { opacity: 1; transform: none; }
 }
-/* 俏皮词换词：两行字当作一条履带，整体往上滚半格（半格＝一行）。
-   起点是 translateY(0)（露出上一句），终点是 translateY(-50%)（露出新的一句），
-   缓动前段快、后段慢慢落位，所以读起来是「滚上去停住」，不是匀速平移。
-   裁切框（.pgc-flavor 的 overflow: hidden）负责把滚出框的那半句切干净。 */
-@keyframes pgc-flavor-roll {
-  from { transform: translateY(0); }
-  to { transform: translateY(-50%); }
+@keyframes pgc-label-out {
+  from { opacity: 1; transform: none; }
+  to { opacity: 0; transform: translateY(-3px); }
+}
+/* 俏皮词换词：两层各走一条动画，新词从下面 60% 顶上来，旧词从原位往上 60% 滚出去。
+   两条同时开始、同时结束，方向都是向上；只碰 opacity / transform，
+   裁切框（.pgc-flavor 的 overflow: hidden）负责把滚出胶囊的那半句切干净。
+   缓动 cubic-bezier(.22,.9,.3,1)：起步快、后段慢慢落位，读起来是「滚上去停住」。 */
+@keyframes pgc-flavor-in {
+  from { opacity: 0; transform: translateY(60%); }
+  to { opacity: 1; transform: none; }
+}
+@keyframes pgc-flavor-out {
+  from { opacity: 1; transform: none; }
+  to { opacity: 0; transform: translateY(-60%); }
 }
 /* 三点弹跳：照着 dsh-claude-style 的 @keyframes dsh-claude-wait-dot 写。
    0% 贴地压扁（scale(1.7,.25)），40% 起跳并收回到正常比例，
@@ -2680,6 +2785,10 @@ window.__ModuleLoader__.load({
         DICT,
         LABEL_HOLD_MS,
         LABEL_HOLD_FAST_MS,
+        LABEL_FADE_MS,
+        FLAVOR_ROLL_MS,
+        nextLabelLayers,
+        nextFlavorLayers,
         SETTLE_STEPS,
         FAST_CPS,
         OK_LINGER_MS,
