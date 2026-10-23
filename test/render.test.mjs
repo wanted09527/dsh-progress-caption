@@ -320,7 +320,7 @@ test('默认档的俏皮词不画「一圈」：没有边框、没有底色，�
   assert.doesNotMatch(rule, /animation:/, '外壳依然不许挂动画');
 });
 
-test('俏皮词三档真的分得开：实心有一块底，素色连渐隐都关掉', () => {
+test('俏皮词只剩两档：实心有一块底，素色档连同样式一起删掉', () => {
   const solid = /\.pgc-flavor-solid \.pgc-flavor \{([\s\S]*?)\}/.exec(sheet);
   assert.ok(solid, '要有实心档规则');
   const solidRule = solid[1].replace(/\/\*[\s\S]*?\*\//g, '');
@@ -328,11 +328,11 @@ test('俏皮词三档真的分得开：实心有一块底，素色连渐隐都�
   assert.match(solidRule, /color: #fff/, '实底上要用白字');
   assert.match(solidRule, /mask-image: none/, '实心胶襄必须关掉渐隐，否则两头会被啃成透明');
 
-  const plain = /\.pgc-flavor-plain \.pgc-flavor \{([\s\S]*?)\}/.exec(sheet);
-  assert.ok(plain, '要有素色档规则');
-  const plainRule = plain[1].replace(/\/\*[\s\S]*?\*\//g, '');
-  assert.match(plainRule, /background: transparent/, '素色不许有底色');
-  assert.match(plainRule, /mask-image: none/, '素色连渐隐也不要，词直接顶格');
+  // 素色（plain）这一档按用户要求删掉了：样式段里不许再出现它的规则，
+  // 选项表里也不许再收它（老存档的 'plain' 由 normalizeSettings 折回 'tint'）。
+  assert.equal(__test.FLAVOR_STYLES.length, 2, '俏皮词样子只留两档');
+  assert.deepEqual(__test.FLAVOR_STYLES, ['tint', 'solid']);
+  assert.doesNotMatch(sheet, /\.pgc-flavor-plain/, '素色档整段删除，不许残留');
 
   // 成功 / 失败只换字色，不再铺一层底色。
   const ok = /\.pgc-strip--ok \.pgc-flavor \{([\s\S]*?)\}/.exec(sheet);
@@ -564,30 +564,42 @@ test('模型已经在写回答 → 常驻显示「正在组织回答」，不闪
   assert.match(text(view), /正在组织回答/);
 });
 
-test('写回答时选了「只看工具」→ 才收成齿轮', () => {
+test('写回答时不会再收成齿轮：factsOnly 已删，写回答一律常驻', () => {
+  // 老存档里可能还留着 factsOnly:true —— 这个字段已经整项删掉，
+  // 传进来也必须被无视：写回答时就该显示「正在组织回答」，而不是收起来。
   const view = __test.deriveCaption({
     partial: { turn: 7, step: 0, blocks: [{ kind: 'text', text: '结论如下……' }] },
     runningCalls: [],
     nodes: [],
     factsOnly: true,
   });
-  assert.equal(view, null);
+  assert.ok(view, '写回答时不许再因为老字段而收起来');
+  assert.equal(view.state, 'writing');
+  assert.match(view.key, /^write:/);
 });
 
 /* ---------------- 设置与俏皮词（纯逻辑，不依赖 React） ---------------- */
 
 const { __test } = mod;
 
-test('设置：坏值一律兜底回默认', () => {
+test('设置：坏值一律兜底回默认，删掉的档位折回默认档', () => {
   assert.deepEqual(__test.normalizeSettings(null), __test.DEFAULT_SETTINGS);
   assert.deepEqual(__test.normalizeSettings({ size: 'xxl', subLine: 'yes', anim: 'boom', shape: 'donut', words: 'yes' }), {
-    size: 'm', subLine: true, anim: 'calm', motion: 'plain', words: true, factsOnly: false,
-    accent: 'theme', okColor: 'theme', badColor: 'theme', flavorStyle: 'tint',
+    size: 'm', subLine: true, anim: 'calm', motion: 'plain', words: true,
+    accent: 'theme', flavorStyle: 'tint',
   });
-  assert.deepEqual(__test.normalizeSettings({ size: 'l', subLine: true, anim: 'off', words: false, factsOnly: true }), {
-    size: 'l', subLine: true, anim: 'off', motion: 'plain', words: false, factsOnly: true,
-    accent: 'theme', okColor: 'theme', badColor: 'theme', flavorStyle: 'tint',
+  // 老存档兼容：anim:'off'（全静止档已删）与 flavorStyle:'plain'（素色档已删）
+  // 都是非法值，一律折回默认档，而不是原样带进运行期。
+  assert.deepEqual(__test.normalizeSettings({ size: 'l', subLine: true, anim: 'off', words: false }), {
+    size: 'l', subLine: true, anim: 'calm', motion: 'plain', words: false,
+    accent: 'theme', flavorStyle: 'tint',
   });
+  assert.equal(__test.normalizeSettings({ flavorStyle: 'plain' }).flavorStyle, 'tint', '素色档折回渐隐');
+  // 删掉的字段不再出现在结果里，老存档带进来也不会被读。
+  const normalized = __test.normalizeSettings({ okColor: 'red', badColor: 'teal', factsOnly: true });
+  for (const gone of ['okColor', 'badColor', 'factsOnly']) {
+    assert.equal(gone in normalized, false, gone + ' 已彻底移除');
+  }
   // 老存档里那个 shape 字段不再读：形态只有一种，存进来也不认。
   assert.equal('shape' in __test.normalizeSettings({ shape: 'orbit' }), false, 'shape 已彻底移除');
   // 老存档兼容：lines: 3 等价于 subLine: true；lines: 1 等价于 false。
@@ -601,50 +613,74 @@ test('设置：没有 localStorage 也不崩', () => {
   assert.doesNotThrow(() => __test.writeSettings({ size: 's', subLine: true, anim: 'dots', words: false }));
 });
 
-test('配色：选了色就挂 CSS 变量，跟随主题时一个都不挂', () => {
+test('配色：选了主色才挂变量，跟随主题时一个都不挂，成功 / 失败色不再由用户决定', () => {
   // 跟随主题：不注入变量，CSS 会自己退回 --dsw-alias-* 主题色
-  assert.deepEqual(__test.stripVars({ accent: 'theme', okColor: 'theme', badColor: 'theme' }), {});
-  const vars = __test.stripVars({ accent: 'forest', okColor: 'green', badColor: 'red' });
-  assert.equal(vars['--pgc-accent'], '#2f9e68');
-  assert.equal(vars['--pgc-ok'], '#2f9e68');
-  assert.equal(vars['--pgc-bad'], '#d94a3d');
+  assert.deepEqual(__test.stripVars({ accent: 'theme' }), {});
+  const vars = __test.stripVars({ accent: 'ocean' });
+  assert.equal(vars['--pgc-accent'], '#4d6bfe');
+  assert.equal(vars['--pgc-ok'], undefined, '成功色不再由设置注入，走主题变量');
+  assert.equal(vars['--pgc-bad'], undefined, '失败色同理');
+  assert.deepEqual(Object.keys(vars), ['--pgc-accent'], '除主色外一个变量都不挂');
   // 表里没有的键一律当「跟随主题」，不抛异常
   assert.deepEqual(__test.stripVars({ accent: 'nope' }), {});
 });
 
-test('配色：色值都是合法十六进制，且六个主色互不相同', () => {
+test('配色：色值都是合法十六进制，且三项里正好两个可选色互不相同', () => {
   const accents = __test.ACCENTS;
+  assert.deepEqual(Object.keys(accents), ['theme', 'ocean', 'rose'], '主色只留跟随主题 / 蓝 / 粉');
   const values = Object.keys(accents)
     .map((key) => accents[key].value)
     .filter(Boolean);
-  assert.equal(values.length, 6, '主色应该正好 6 个可选值');
+  assert.equal(values.length, 2, '除跟随主题外只剩两个可选色');
   values.forEach((value) => assert.match(value, /^#[0-9a-f]{6}$/i));
   assert.equal(new Set(values).size, values.length, '主色不能有重复');
+  assert.equal(accents.ocean.value, '#4d6bfe', '蓝');
+  assert.equal(accents.rose.value, '#e0558c', '粉');
 });
 
-test('设置面板：分成「长什么样 / 颜色 / 说什么」三组，颜色三项都在', () => {
+test('设置面板：不再有「长什么样 / 颜色 / 说什么」分组标题，改成一行一个设置', () => {
   const view = render({
     partial: { turn: 1, step: 0, blocks: [{ kind: 'reasoning', text: '看看配置' }] },
     runningCalls: [],
     nodes: [],
   });
   const shown = text(view);
-  assert.match(shown, /长什么样/);
-  assert.match(shown, /颜色/);
-  assert.match(shown, /说什么/);
-  assert.match(shown, /字幕条颜色/);
-  assert.match(shown, /跑成功时/);
-  assert.match(shown, /跑失败时/);
-  // 俏皮词样式三选一
+  // 三排大字分组标题按用户要求整段撤掉：分组关系交给行间的 .5px 细分隔线。
+  assert.doesNotMatch(shown, /长什么样/, '分组标题「长什么样」应已移除');
+  assert.doesNotMatch(shown, /说什么/, '分组标题「说什么」应已移除');
+  // 「颜色」这个词只剩「字幕条颜色」这一行标题里还有，不能单独作为分组标题出现。
+  assert.doesNotMatch(shown, /\s颜色\s/, '分组标题「颜色」应已移除');
+  assert.match(shown, /字幕条颜色/, '主色那一行还在');
+
+  const dict = dictionaries.get('dshProgressCaption');
+  for (const gone of ['groupLook', 'groupColor', 'groupSay']) {
+    assert.equal(dict.zh[gone], undefined, 'zh 字典里不许再有 ' + gone);
+    assert.equal(dict.en[gone], undefined, 'en 字典里不许再有 ' + gone);
+  }
+  // 面板里也不许再有 pgc-group 节点（哪怕文本为空，只要结构还在就算没删干净）。
+  const groupNodes = [];
+  const scan = (node) => {
+    if (!node || typeof node !== 'object') return;
+    if (node.props && typeof node.props.className === 'string'
+      && node.props.className.split(/\s+/).includes('pgc-group')) groupNodes.push(node);
+    (node.children || []).forEach(scan);
+  };
+  scan(view);
+  assert.equal(groupNodes.length, 0, 'pgc-group 节点应已从面板里删掉');
+  // 「跑成功时 / 跑失败时」两项按用户要求删掉：成功失败一律跟主题走。
+  assert.doesNotMatch(shown, /跑成功时/);
+  assert.doesNotMatch(shown, /跑失败时/);
+  // 俏皮词样式两选一，素色档没了
   assert.match(shown, /渐隐/);
   assert.match(shown, /实心/);
-  assert.match(shown, /素色/);
+  assert.doesNotMatch(shown, /素色/);
 });
 
 test('配色选中后会写回 root 的 style，且 class 带上俏皮词样式', () => {
   const previous = globalThis.localStorage;
+  // 老存档里的 violet / teal / orange 都已删：非法值折回「跟随主题」，不注入任何变量。
   globalThis.localStorage = {
-    getItem: () => JSON.stringify({ accent: 'violet', okColor: 'teal', badColor: 'orange', flavorStyle: 'solid' }),
+    getItem: () => JSON.stringify({ accent: 'rose', okColor: 'teal', badColor: 'orange', flavorStyle: 'solid' }),
     setItem: () => {},
   };
   try {
@@ -653,9 +689,9 @@ test('配色选中后会写回 root 的 style，且 class 带上俏皮词样式'
       runningCalls: [],
       nodes: [],
     });
-    assert.equal(view.props.style['--pgc-accent'], '#8b5cf6');
-    assert.equal(view.props.style['--pgc-ok'], '#12a594');
-    assert.equal(view.props.style['--pgc-bad'], '#e08a2e');
+    assert.equal(view.props.style['--pgc-accent'], '#e0558c');
+    assert.equal(view.props.style['--pgc-ok'], undefined, '成功色不再写内联变量');
+    assert.equal(view.props.style['--pgc-bad'], undefined, '失败色不再写内联变量');
     assert.match(view.props.className, /pgc-flavor-solid/);
   } finally {
     if (previous === undefined) delete globalThis.localStorage;
@@ -732,7 +768,115 @@ test('设置面板是 2026 的样子：分段选择 + 开关，没有原生 sele
   assert.ok(classes.some((name) => name === 'pgc-seg'), '分段选择器');
   assert.ok(classes.some((name) => name === 'pgc-switch'), '滑动开关');
   assert.ok(classes.some((name) => name === 'pgc-switch-thumb'), '开关滑块');
-  assert.ok(classes.some((name) => name === 'pgc-sheet-note'), '本地保存说明');
+  // 底部那两行小字（本地保存说明 + 免责声明）已按用户要求删掉，但免责声明
+  // 仍挂在字幕条根节点的 title 上（悬停能看到），所以字典键要留着。
+  assert.ok(!classes.some((name) => name === 'pgc-sheet-note'), '面板底部说明已删');
+  const root = render({
+    partial: { turn: 2, step: 0, blocks: [{ kind: 'reasoning', text: '看看配置' }] },
+    runningCalls: [],
+    nodes: [],
+  });
+  assert.equal(root.props.title, '字幕由规则推断，不代表模型真实意图', '免责声明转移到根节点 title');
+  const dict = dictionaries.get('dshProgressCaption');
+  assert.equal(dict.zh.disclaimer, '字幕由规则推断，不代表模型真实意图', '字典键必须保留');
+  assert.equal(dict.zh.sheetNote, undefined, 'sheetNote 字典键已删');
+});
+
+test('设置行是「左标题 + 右控件」两栏，行间靠 .5px 细分隔线分段', () => {
+  const view = render({
+    partial: { turn: 2, step: 0, blocks: [{ kind: 'reasoning', text: '看看配置' }] },
+    runningCalls: [],
+    nodes: [],
+  });
+
+  // 结构：每一行都是 .pgc-set-row，里面左边一坨 .pgc-set-text（标题 + 可选说明），
+  // 右边是控件本体。照官方 / Claude 设置页那条 row 来的。
+  const rows = [];
+  const scanRows = (node) => {
+    if (!node || typeof node !== 'object') return;
+    if (node.props && typeof node.props.className === 'string'
+      && node.props.className.split(/\s+/).includes('pgc-set-row')) rows.push(node);
+    (node.children || []).forEach(scanRows);
+  };
+  scanRows(view);
+  assert.equal(rows.length, 7, '面板正好七行设置（字号 / 动画 / 状态标记 / 字幕条颜色 / 俏皮词样子 / 显示俏皮词 / 思考原话）');
+  rows.forEach((row, index) => {
+    const hasText = (row.children || []).some((child) => child
+      && child.props && typeof child.props.className === 'string'
+      && child.props.className.split(/\s+/).includes('pgc-set-text'));
+    assert.ok(hasText, '第 ' + index + ' 行缺左边的标题列');
+  });
+
+  // 说明必须只有两行（状态标记 + 思考原话），且都不超过一句。
+  const descs = [];
+  const scanDesc = (node) => {
+    if (!node || typeof node !== 'object') return;
+    if (node.props && typeof node.props.className === 'string'
+      && node.props.className.split(/\s+/).includes('pgc-set-desc')) descs.push(text(node));
+    (node.children || []).forEach(scanDesc);
+  };
+  scanDesc(view);
+  assert.equal(descs.length, 2, '只有两行带小字说明');
+  descs.forEach((desc) => assert.ok(desc.trim().length > 0, '说明不许是空的'));
+
+  // CSS：分组标题的样式整段删掉；行用 .5px 上边线分隔，首行不要线。
+  assert.doesNotMatch(sheet, /\.pgc-group\b/, '.pgc-group 样式应已删除');
+  const rowRule = /\.pgc-set-row \{([\s\S]*?)\}/.exec(sheet);
+  assert.ok(rowRule, '要有 .pgc-set-row 规则');
+  assert.match(rowRule[1], /display: flex/, '两栏就是 flex 一行');
+  assert.match(rowRule[1], /justify-content: space-between/, '标题在左、控件在右');
+  assert.match(rowRule[1], /align-items: center/, '垂直居中');
+  assert.match(rowRule[1], /padding: 10px 0/, '弹层比整页设置紧凑，行内边距 10px 0');
+  assert.match(rowRule[1], /border-top: \.5px solid var\(--dsw-alias-border-l2, color-mix\(in srgb, currentColor 12%, transparent\)\)/,
+    '行与行之间是 .5px 细分隔线');
+  assert.match(sheet, /\.pgc-set-row:first-child \{ border-top: 0;/, '首行不要上边线');
+  const nameRule = /\.pgc-set-name \{([\s\S]*?)\}/.exec(sheet);
+  assert.ok(nameRule, '要有 .pgc-set-name');
+  assert.match(nameRule[1], /font-size: 12\.5px/, '标题 12.5px');
+  const descRule = /\.pgc-set-desc \{([\s\S]*?)\}/.exec(sheet);
+  assert.ok(descRule, '要有 .pgc-set-desc');
+  assert.match(descRule[1], /font-size: 11px/, '说明 11px');
+  // 控件尺寸统一：分段按钮 11px / 3px 8px，开关轨道 30×18，色块 18px。
+  const segBtn = /\.pgc-seg-btn \{([\s\S]*?)\}/.exec(sheet);
+  assert.match(segBtn[1], /padding: 3px 8px/, '分段按钮内边距 3px 8px');
+  assert.match(segBtn[1], /font-size: 11px/, '分段按钮字号 11px');
+  const track = /\.pgc-switch-track \{([\s\S]*?)\}/.exec(sheet);
+  assert.match(track[1], /width: 30px; height: 18px/, '开关轨道 30×18');
+  const swatch = /\.pgc-swatch \{([\s\S]*?)\}/.exec(sheet);
+  assert.match(swatch[1], /width: 18px; height: 18px/, '色块 18px');
+  // 控件贴右；窄屏（<280px）换行后改贴左。
+  assert.match(sheet, /\.pgc-set-row > \.pgc-seg,\n\.pgc-set-row > \.pgc-switch,\n\.pgc-set-row > \.pgc-swatches \{ flex: 0 0 auto; margin-left: auto; \}/,
+    '控件贴右');
+  assert.match(sheet, /@media \(max-width: 280px\) \{[\s\S]*?margin-left: 0;[\s\S]*?\}/, '窄屏控件改贴左');
+
+  // 面板外框：还是毛玻璃，宽度上限 300px，头部保留标题 + ✕。
+  const sheetRule = /\.pgc-sheet \{([\s\S]*?)\n\}/.exec(sheet);
+  assert.match(sheetRule[1], /width: 300px/, '宽度上限 300px');
+  assert.match(sheetRule[1], /background: var\(--dsw-alias-bg-overlay/, '毛玻璃底色沿用主题浮层');
+  assert.match(sheetRule[1], /backdrop-filter: blur/, '毛玻璃');
+  assert.match(view.props.className, /pgc-strip/);
+  const classes = [];
+  const scanClass = (node) => {
+    if (!node || typeof node !== 'object') return;
+    if (node.props && typeof node.props.className === 'string') classes.push(node.props.className);
+    (node.children || []).forEach(scanClass);
+  };
+  scanClass(view);
+  assert.ok(classes.some((name) => name === 'pgc-sheet-head'), '头部还在');
+  assert.ok(classes.some((name) => name === 'pgc-sheet-title'), '标题还在');
+  assert.ok(classes.some((name) => name === 'pgc-sheet-close'), '✕ 还在');
+  // 底部不再有任何小字。
+  assert.ok(!classes.some((name) => name === 'pgc-sheet-note'), '底部说明已删');
+  assert.doesNotMatch(sheet, /\.pgc-sheet-note\b/, '底部说明的样式也删了');
+
+  // 合成层约束与动效降级：面板过渡在 reduced-motion 下一并关掉。
+  const reducedBlock = /@media \(prefers-reduced-motion: reduce\) \{([\s\S]*?)\n\}/.exec(sheet);
+  assert.ok(reducedBlock, '要有 reduced-motion 兜底');
+  assert.match(reducedBlock[1], /\.pgc-sheet, \.pgc-sheet \* \{ animation: none !important; transition: none !important; \}/,
+    '系统开了减少动效时，面板的过渡也要停');
+  // 只动合成层属性：面板里出现的过渡/动画属性不许碰宽高。
+  const panelCss = sheet.slice(sheet.indexOf('.pgc-sheet {'), sheet.indexOf('.pgc-strip--handle .pgc-sheet'));
+  assert.doesNotMatch(panelCss, /animation: [^;]*\b(width|height)\b/, '面板不许动画宽高');
 });
 
 test('齿轮点开才出现面板（收起时 aria-hidden）', () => {
@@ -773,14 +917,13 @@ test('字幕带设置面板：字号 / 思考原话 / 动画 / 俏皮词', () =>
   // 「行数」这个设置项已经删掉了：它原来只起「要不要显示副行」的开关作用，
   // 名字却叫行数，实测开到 2/3 几乎没有视觉差别（主文案是整句，不折行）。
   assert.doesNotMatch(shown, /行数/, '行数设置项应已移除');
-  // 「没线索时」那一行：两个选项都用人话写出来，下面再补一句解释
-  assert.match(shown, /没线索时/);
-  assert.match(shown, /只报动作/);
-  assert.match(shown, /猜一猜/);
-  assert.match(shown, /猜错很正常/);
+  // 「没线索时」整项按用户要求删掉：不读思考文本这条岔路没了，也就没有这个设置。
+  assert.doesNotMatch(shown, /没线索时/, '没线索时设置项应已移除');
+  assert.doesNotMatch(shown, /只报动作|猜一猜|猜错很正常/, '它下面的选项和说明也一起删');
   assert.match(shown, /扫光/);
   assert.match(shown, /安静/);
-  assert.match(shown, /全静止/);
+  // 「全静止」这一档按用户要求删掉，只剩安静 / 扫光；样式里的兜底规则仍在（另有测试守着）。
+  assert.doesNotMatch(shown, /全静止/, '动画只剩安静 / 扫光两档');
   // 形态选择器已整段撤掉：状态标记只有一种（三点接力跳），不再让用户挑。
   assert.doesNotMatch(shown, /进行中的标记/);
   assert.doesNotMatch(shown, /横扫|转圈|立体/);
@@ -789,15 +932,14 @@ test('字幕带设置面板：字号 / 思考原话 / 动画 / 俏皮词', () =>
   assert.doesNotMatch(view.props.className, /pgc-shape-/);
 });
 
-test('把「没线索时」切到只报动作 → 选中项跟着变', () => {
+test('「没线索时」已整项删除：字典键与面板行都不许回来', () => {
   const dict = dictionaries.get('dshProgressCaption');
-  assert.equal(dict.zh.facts, '没线索时');
-  assert.equal(dict.zh.factsTools, '只报动作');
-  assert.equal(dict.zh.factsThinking, '猜一猜');
-  assert.equal(dict.en.factsTools, 'Actions only');
-  assert.equal(dict.en.factsThinking, 'Guess a little');
-
-  // 用假 localStorage 模拟用户已经打开过这个开关
+  for (const gone of ['facts', 'factsTools', 'factsThinking', 'factsHint']) {
+    assert.equal(dict.zh[gone], undefined, 'zh 里不许再有 ' + gone);
+    assert.equal(dict.en[gone], undefined, 'en 里不许再有 ' + gone);
+  }
+  // 老存档里可能还存着 factsOnly:true —— 这个字段已经不读了，
+  // 面板照常渲染，思考文本照常按规则表猜。
   const previous = globalThis.localStorage;
   globalThis.localStorage = {
     getItem: () => JSON.stringify({ factsOnly: true }),
@@ -805,15 +947,14 @@ test('把「没线索时」切到只报动作 → 选中项跟着变', () => {
   };
   try {
     const view = render({
-      partial: { turn: 2, step: 0, blocks: [{ kind: 'reasoning', text: '看看配置' }] },
+      partial: { turn: 2, step: 0, blocks: [{ kind: 'reasoning', text: '我先读取配置文件 package.json' }] },
       runningCalls: [],
       nodes: [],
     });
     const shown = text(view);
-    assert.match(shown, /没线索时/);
-    // 两个选项始终都在，靠选中态区分，不是「开关文字来回换」
-    assert.match(shown, /只报动作/);
-    assert.match(shown, /猜一猜/);
+    assert.doesNotMatch(shown, /没线索时/);
+    assert.match(shown, /(正在读取配置文件|翻一下配置文件|看看配置里怎么写的|对一下配置项)/,
+      '老字段不再能关掉「读思考文本猜一句」');
   } finally {
     if (previous === undefined) delete globalThis.localStorage;
     else globalThis.localStorage = previous;
@@ -871,7 +1012,28 @@ test('Claude 三态的关键帧都齐：弹跳 / 斜线 / 四条绕圈轨道', (
     '非绕圈形态藏起第四颗');
 });
 
-test('设置面板里有「状态标记」两个选项和一句说明，动效开关写得明白', () => {
+test('绕圈轨道要采得够密：每半圈都有中间点，否则那颗点会横穿中心', () => {
+  for (const n of [1, 2, 3, 4]) {
+    const rule = new RegExp('@keyframes pgc-dot-orbit-' + n + ' \\{([\\s\\S]*?)\\n\\}').exec(sheet);
+    assert.ok(rule, '找不到第 ' + n + ' 条绕圈轨道');
+    const body = rule[1];
+    // 只在起点和终点各写一个坐标时，浏览器在两点之间走直线 ——
+    // 那条直线穿过椭圆中心，视觉上就是「有一颗点转得不对、斜着横穿」。
+    const stops = body.match(/translate:/g) || [];
+    assert.ok(stops.length >= 8,
+      '第 ' + n + ' 条轨道只有 ' + stops.length + ' 个采样点，太稀，会在椭圆的直边上抄近路');
+    // 采样点要真的贴着椭圆跑：四个极值都得用到（每条轨道走的是斜对的两个角）。
+    assert.match(body, /-4\.75px/, '第 ' + n + ' 条要到得了左端');
+    assert.match(body, /4\.75px/, '第 ' + n + ' 条要到得了右端');
+    assert.match(body, /-5\.8px/, '第 ' + n + ' 条要到得了上端');
+    assert.match(body, /5\.8px/, '第 ' + n + ' 条要到得了下端');
+    // 绕圈只能动 translate，不许改尺寸或定位，否则每帧都要重排。
+    assert.doesNotMatch(body, /\b(width|height|margin|padding|top|left|right|bottom):/,
+      '第 ' + n + ' 条只许动 translate');
+  }
+});
+
+test('设置面板里「状态标记」是开关：关=经典三点，开=Claude 三态', () => {
   const view = render({
     partial: { turn: 2, step: 0, blocks: [{ kind: 'reasoning', text: '看看配置' }] },
     runningCalls: [],
@@ -879,10 +1041,121 @@ test('设置面板里有「状态标记」两个选项和一句说明，动效�
   });
   const shown = text(view);
   assert.match(shown, /状态标记/, '要有这一行');
-  assert.match(shown, /经典三点/, '选项一');
-  assert.match(shown, /Claude 三态/, '选项二');
-  assert.match(shown, /弹跳 \/ 斜线 \/ 绕圈轮着放/, '说明要讲清三种形态怎么轮');
-  assert.match(shown, /每 6 秒换一种/, '轮换间隔要写出来');
+
+  // 找到「状态标记」那一行，看它右边挂的是什么控件。
+  let row = null;
+  const walk = (node) => {
+    if (!node || typeof node !== 'object') return;
+    if (node.props && node.props.className === 'pgc-set-row' && text(node).includes('状态标记')) row = node;
+    (node.children || []).forEach(walk);
+  };
+  walk(view);
+  assert.ok(row, '找到状态标记那一行');
+
+  const rowClasses = [];
+  const collect = (node) => {
+    if (!node || typeof node !== 'object') return;
+    if (node.props && typeof node.props.className === 'string') rowClasses.push(node.props.className);
+    (node.children || []).forEach(collect);
+  };
+  collect(row);
+  assert.ok(rowClasses.includes('pgc-switch'), '这一行是开关，不是分段选择');
+  assert.ok(!rowClasses.includes('pgc-seg'), '分段控件不许留下');
+  const switchProps = [];
+  const grabSwitch = (node) => {
+    if (!node || typeof node !== 'object') return;
+    if (node.props && node.props.className === 'pgc-switch') switchProps.push(node.props);
+    (node.children || []).forEach(grabSwitch);
+  };
+  grabSwitch(row);
+  assert.equal(switchProps.length, 1, '一个开关就够，不用并列两个按钮');
+  assert.equal(switchProps[0].role, 'switch', '读屏要念成开关');
+  assert.equal(switchProps[0]['aria-checked'], 'false', '默认关着＝经典三点');
+
+  // 开关标签随开关状态换：关着写「经典三点」，打开写「Claude 三态」。
+  assert.match(shown, /经典三点/);
+
+  // 说明不再单独占一段（原来那行 .pgc-sheet-hint 已删），改成行内的一行小字：
+  // 挂在「状态标记」那一行的左标题下面，形态是 .pgc-set-desc。
+  const hints = [];
+  const grabHint = (node) => {
+    if (!node || typeof node !== 'object') return;
+    if (node.props && typeof node.props.className === 'string'
+      && node.props.className.split(/\s+/).includes('pgc-set-desc')) hints.push(text(node));
+    (node.children || []).forEach(grabHint);
+  };
+  grabHint(view);
+  assert.equal(hints.length, 2, '面板里只有两行带说明：状态标记 + 思考原话');
+  const motionHint = hints.find((hint) => hint.includes('Claude'));
+  assert.ok(motionHint, '状态标记那一行要有说明');
+  assert.ok(!motionHint.includes('每 6 秒'), '把轮换间隔这类细节从说明里撤掉');
+  assert.equal(motionHint.split('。').filter(Boolean).length, 1, '说明精简到一句以内');
+
+  // 原来的独立说明段落（.pgc-sheet-hint）不许留下来——它已经并进行里了。
+  const stray = [];
+  const grabStray = (node) => {
+    if (!node || typeof node !== 'object') return;
+    if (node.props && typeof node.props.className === 'string'
+      && node.props.className.split(/\s+/).includes('pgc-sheet-hint')) stray.push(node);
+    (node.children || []).forEach(grabStray);
+  };
+  grabStray(view);
+  assert.equal(stray.length, 0, '独立说明段落已并入设置行');
+  // 说明必须挂在紧挨开关的那一行里，不能飘到面板别处。
+  const motionRow = [];
+  const grabRow = (node) => {
+    if (!node || typeof node !== 'object') return;
+    if (node.props && node.props.className === 'pgc-set-row' && text(node).includes('状态标记')) motionRow.push(node);
+    (node.children || []).forEach(grabRow);
+  };
+  grabRow(view);
+  assert.equal(motionRow.length, 1);
+  const descInRow = [];
+  const grabDescInRow = (node) => {
+    if (!node || typeof node !== 'object') return;
+    if (node.props && typeof node.props.className === 'string'
+      && node.props.className.split(/\s+/).includes('pgc-set-desc')) descInRow.push(text(node));
+    (node.children || []).forEach(grabDescInRow);
+  };
+  grabDescInRow(motionRow[0]);
+  assert.equal(descInRow.length, 1, '状态标记这一行里恰好一行说明');
+
+  // 打开之后，标签换成 Claude 三态，开关状态也跟着翻。
+  const previous = globalThis.localStorage;
+  globalThis.localStorage = {
+    getItem: () => JSON.stringify({ motion: 'claude' }),
+    setItem: () => {},
+  };
+  try {
+    const onView = render({
+      partial: { turn: 2, step: 0, blocks: [{ kind: 'reasoning', text: '看看配置' }] },
+      runningCalls: [],
+      nodes: [],
+    });
+    assert.match(text(onView), /Claude 三态/, '打开后标签换成 Claude 三态');
+    // 只认「状态标记」那一行里的开关：面板上还有别的开关，不能抓到最后一个。
+    let onRow = null;
+    const findRow = (node) => {
+      if (!node || typeof node !== 'object') return;
+      if (node.props && node.props.className === 'pgc-set-row' && text(node).includes('状态标记')) onRow = node;
+      (node.children || []).forEach(findRow);
+    };
+    findRow(onView);
+    assert.ok(onRow, '找到打开状态下的状态标记那一行');
+    let onSwitch = null;
+    const findOn = (node) => {
+      if (!node || typeof node !== 'object') return;
+      if (node.props && node.props.className === 'pgc-switch') onSwitch = node.props;
+      (node.children || []).forEach(findOn);
+    };
+    findOn(onRow);
+    assert.ok(onSwitch, '这一行里有开关');
+    assert.equal(onSwitch['aria-checked'], 'true', '开关处于打开态');
+    assert.equal(onSwitch['data-on'], 'true');
+  } finally {
+    if (previous === undefined) delete globalThis.localStorage;
+    else globalThis.localStorage = previous;
+  }
 });
 
 test('一条字幕只留一个东西在动：俏皮词在场时，右边那圈弧线让位', () => {
@@ -1000,23 +1273,151 @@ test('工具参数 → 只显示文件名 / 搜索词，不显示整段 JSON', (
   assert.equal(__test.toolTarget({}), '');
   // 已结算的结果：argsRaw 在 call 里（窗口截断时可能没有）
   assert.equal(__test.toolTarget({ call: { name: 'read', argsRaw: '{"path":"E:/a/b.js"}' } }), 'b.js');
+  // 各家工具的路径字段叫法不同，都只留文件名。
+  assert.equal(__test.toolTarget({ argsRaw: '{"file_path":"E:/a/b/client.js"}' }), 'client.js');
+  assert.equal(__test.toolTarget({ argsRaw: '{"files":["E:/a/b/one.md","E:/a/b/two.md"]}' }), 'one.md');
+  assert.equal(__test.toolTarget({ argsRaw: '{"notebook_path":"E:/a/nb/plan.ipynb"}' }), 'plan.ipynb');
+  // 工具自带的自然语言描述：本身就是人话，截断后直接用。
+  assert.equal(__test.toolTarget({ argsRaw: '{"description":"审查设置面板"}' }), '审查设置面板');
+  // 顺序不许乱：命令 > path > file_path。同一份参数里同时有时，取更靠前的那个。
+  assert.equal(__test.toolTarget({ argsRaw: '{"command":"npm test","path":"E:/a/b.js"}' }), 'npm test');
+  assert.equal(__test.toolTarget({ argsRaw: '{"path":"E:/a/b.js","file_path":"E:/c/d.js"}' }), 'b.js');
 });
 
 test('动作人话：不同工具组用不同的动词，完成态换完成动词', () => {
   assert.equal(__test.actionText('bash', 'npm test', 'running'), '正在执行命令 npm test');
   assert.equal(__test.actionText('bash', 'npm test', 'ok'), '跑完命令 npm test');
-  assert.equal(__test.actionText('read', 'client.js', 'running'), '正在读 client.js');
+  assert.equal(__test.actionText('read', 'client.js', 'running'), '正在读取 client.js');
   assert.equal(__test.actionText('read', 'client.js', 'ok'), '读完了 client.js');
-  assert.equal(__test.actionText('write', 'a.js', 'running'), '正在写 a.js');
+  assert.equal(__test.actionText('write', 'a.js', 'running'), '正在写入 a.js');
   assert.equal(__test.actionText('edit', 'a.js', 'ok'), '改好了 a.js');
   assert.equal(__test.actionText('subagent', '审查', 'running'), '派了小助手 审查');
   // 以前这些高频工具全掉进 'other'，只能把工具名直接糊进句子（「正在执行 mnemon_recall」）。
   assert.equal(__test.actionText('mnemon_recall', '', 'running'), '正在翻记忆');
-  assert.equal(__test.actionText('read_image', 'a.png', 'running'), '正在读 a.png');
+  assert.equal(__test.actionText('read_image', 'a.png', 'running'), '正在读取 a.png');
   assert.equal(__test.actionText('present', '', 'running'), '正在出交付物');
   assert.equal(__test.actionText('todo_write', '', 'ok'), '理好计划');
   // 真的没归类的才落到 other。
   assert.equal(__test.actionText('cordis_inspect_query', '', 'running'), '正在执行 cordis_inspect_query');
+});
+
+test('拿不到对象时补兜底名词，不留「正在读取 」这种半句', () => {
+  // 动词本身不完整 → 补名词。
+  assert.equal(__test.actionText('read', '', 'running'), '正在读取文件');
+  assert.equal(__test.actionText('write', '', 'running'), '正在写入文件');
+  assert.equal(__test.actionText('edit', '', 'running'), '正在编辑文件');
+  assert.equal(__test.actionText('grep', '', 'running'), '正在搜索代码');
+  // 动词里已经含着名词 → 不重复第二次。
+  assert.equal(__test.actionText('bash', '', 'running'), '正在执行命令');
+  assert.equal(__test.actionText('web_search', '', 'running'), '正在搜网络资料');
+  assert.equal(__test.actionText('subagent', '', 'running'), '派了小助手');
+  // 完成态自己就能成句，不补名词。
+  assert.equal(__test.actionText('read', '', 'ok'), '读完了');
+  assert.equal(__test.actionText('write', '', 'ok'), '写好了');
+  // 末尾不许带空格。
+  for (const tool of ['read', 'write', 'edit', 'grep', 'web_search', 'bash', 'mnemon_recall', 'present']) {
+    assert.equal(__test.actionText(tool, '', 'running'), __test.actionText(tool, '', 'running').trim(),
+      tool + ' 的空对象文案末尾不许有空格');
+  }
+});
+
+test('细粒度状态：主文案带上具体对象（读哪个文件 / 跑哪条命令）', () => {
+  // ① read 工具带 path → 「正在读取 client.js」。
+  const reading = render({
+    partial: { turn: 1, step: 2, blocks: [] },
+    runningCalls: [({
+      callId: 'c1', name: 'read', step: 2, time: Date.now() - 800,
+      argsRaw: '{"path":"E:/a/b/client.js"}',
+    })],
+    nodes: [],
+  });
+  assert.match(text(reading), /正在读取 client\.js/);
+  // ② bash 带 command → 「正在执行命令 npm test」。
+  const running = render({
+    partial: { turn: 1, step: 2, blocks: [] },
+    runningCalls: [({
+      callId: 'c2', name: 'bash', step: 2, time: Date.now() - 800,
+      argsRaw: '{"command":"npm test"}',
+    })],
+    nodes: [],
+  });
+  assert.match(text(running), /正在执行命令 npm test/);
+  // ③ 只有 file_path 没有 path → 同样取到文件名。
+  const viaFilePath = render({
+    partial: { turn: 1, step: 2, blocks: [] },
+    runningCalls: [({
+      callId: 'c3', name: 'edit', step: 2, time: Date.now() - 800,
+      argsRaw: '{"file_path":"E:/a/b/README.md"}',
+    })],
+    nodes: [],
+  });
+  assert.match(text(viaFilePath), /正在编辑 README\.md/);
+  // ④ 完全没参数 → 「正在读取文件」，不是末尾带空格的「正在读取 」。
+  const noArgs = render({
+    partial: { turn: 1, step: 2, blocks: [] },
+    runningCalls: [({ callId: 'c4', name: 'read', step: 2, time: Date.now() - 800, argsRaw: '{}' })],
+    nodes: [],
+  });
+  assert.match(text(noArgs), /正在读取文件/);
+  assert.doesNotMatch(text(noArgs), /正在读取\s*$/);
+  // ⑤ 已结算的 read 结果 → 「读完了 client.js」。
+  const done = render({
+    partial: { turn: 1, step: 3, blocks: [{ kind: 'tool-call', callId: 'c5', name: 'read', argsRaw: '{"path":"E:/a/b/client.js"}' }] },
+    runningCalls: [],
+    nodes: [{
+      kind: 'tool-result',
+      seq: 5,
+      callId: 'c5',
+      name: 'read',
+      time: 2000,
+      callTime: 1200,
+      isError: false,
+      content: [{ type: 'text', text: 'file body' }],
+      args: {},
+      call: { name: 'read', argsRaw: '{"path":"E:/a/b/client.js"}' },
+      subCalls: [],
+    }],
+  });
+  assert.match(text(done), /读完了 client\.js/);
+  // ⑥ 失败态也带对象：命令挂了要说清是哪条命令，不能只剩一句「命令执行失败」。
+  const failed = render({
+    partial: { turn: 1, step: 4, blocks: [{ kind: 'tool-call', callId: 'c6', name: 'bash', argsRaw: '{"command":"npm test"}' }] },
+    runningCalls: [],
+    nodes: [{
+      kind: 'tool-result',
+      seq: 6,
+      callId: 'c6',
+      name: 'bash',
+      time: 3000,
+      callTime: 2200,
+      isError: false,
+      content: [{ type: 'text', text: 'boom\n[exit code: 1]' }],
+      args: {},
+      call: { name: 'bash', argsRaw: '{"command":"npm test"}' },
+      subCalls: [],
+    }],
+  });
+  assert.match(text(failed), /命令执行失败（exit code 1） npm test/);
+  // 普通工具失败同样带对象。
+  const failedRead = render({
+    partial: { turn: 1, step: 5, blocks: [{ kind: 'tool-call', callId: 'c7', name: 'read', argsRaw: '{"path":"E:/a/b/client.js"}' }] },
+    runningCalls: [],
+    nodes: [{
+      kind: 'tool-result',
+      seq: 7,
+      callId: 'c7',
+      name: 'read',
+      time: 3000,
+      callTime: 2500,
+      isError: true,
+      error: { name: 'Error', code: 'ENOENT' },
+      content: [{ type: 'text', text: 'no such file' }],
+      args: {},
+      call: { name: 'read', argsRaw: '{"path":"E:/a/b/client.js"}' },
+      subCalls: [],
+    }],
+  });
+  assert.match(text(failedRead), /工具执行失败 client\.js/);
 });
 
 test('阶段话术：工具间隙只报「刚干完什么」，不写「在想下一步」这种空尾巴', () => {
@@ -1089,7 +1490,7 @@ test('想得快也不闪：状态没了之后最后一条至少挂 2.6 秒', () 
   assert.ok(__test.MIN_SHOW_MS >= 2000, '最短停留至少 2 秒，够读完一行');
 });
 
-test('只看工具（factsOnly）：不读思考文本，没有工具就不显示', () => {
+test('「没线索时」整项删掉后，deriveCaption 不再认 factsOnly 这个开关', () => {
   const thinking = {
     partial: { turn: 1, step: 0, blocks: [{ kind: 'reasoning', text: '我先读取配置文件 package.json' }] },
     runningCalls: [],
@@ -1097,9 +1498,12 @@ test('只看工具（factsOnly）：不读思考文本，没有工具就不显�
   };
   // 默认：会按规则表猜（三种说法轮着来，任一种都算命中）
   assert.match(text(render(thinking)), /(正在读取配置文件|翻一下配置文件|看看配置里怎么写的|对一下配置项)/);
-  // 选「只看工具」：同样的数据不再猜
-  assert.equal(__test.deriveCaption({ ...thinking, factsOnly: true }), null);
-  // 但有工具在跑时，仍然照常报事实
+  // 老存档里塞 factsOnly:true 也不再能关掉「读思考文本猜一句」——这个开关已经删了。
+  const legacy = __test.deriveCaption({ ...thinking, factsOnly: true });
+  assert.ok(legacy, 'factsOnly 不再能把字幕整条关掉');
+  assert.equal(legacy.state, 'thinking');
+  assert.equal(legacy.ruleId, 'read-config', '照样按规则表猜');
+  // 也不影响「有工具在跑就照常报事实」：这条路径跟老字段彻底无关了。
   const running = __test.deriveCaption({
     factsOnly: true,
     partial: { turn: 1, step: 0, blocks: [] },

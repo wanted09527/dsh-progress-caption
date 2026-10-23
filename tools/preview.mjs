@@ -17,6 +17,15 @@ const end = source.indexOf('`;', start);
 if (start < 0 || end < 0) throw new Error('client.js 里找不到 CSS 模板字符串');
 const css = source.slice(start + 'const CSS = `'.length, end);
 
+const row = (name, control, desc = '') => `
+            <label class="pgc-set-row">
+              <span class="pgc-set-text">
+                <span class="pgc-set-name">${name}</span>
+                ${desc ? `<span class="pgc-set-desc">${desc}</span>` : ''}
+              </span>
+              ${control}
+            </label>`;
+
 const sheet = (open) => `
       <div class="pgc-settings">
         <button type="button" class="pgc-gear" aria-expanded="${open ? 'true' : 'false'}" aria-label="字幕设置">⚙</button>
@@ -25,82 +34,37 @@ const sheet = (open) => `
             <span class="pgc-sheet-title">字幕设置</span>
             <button type="button" class="pgc-sheet-close" aria-label="关闭">✕</button>
           </div>
-          <div class="pgc-sheet-body">
-            <span class="pgc-group">长什么样</span>
-            <label class="pgc-set-row"><span class="pgc-set-name">字号</span>
+          <div class="pgc-sheet-body">${row('字号', `
               <span class="pgc-seg" role="group">
                 <button type="button" class="pgc-seg-btn" data-on="false">小</button>
                 <button type="button" class="pgc-seg-btn" data-on="true">中</button>
                 <button type="button" class="pgc-seg-btn" data-on="false">大</button>
-              </span>
-            </label>
-            <label class="pgc-set-row"><span class="pgc-set-name">动画</span>
+              </span>`)}${row('动画', `
               <span class="pgc-seg" role="group">
                 <button type="button" class="pgc-seg-btn" data-on="true">安静</button>
                 <button type="button" class="pgc-seg-btn" data-on="false">扫光</button>
-                <button type="button" class="pgc-seg-btn" data-on="false">全静止</button>
-              </span>
-            </label>
-            <label class="pgc-set-row"><span class="pgc-set-name">状态标记</span>
-              <span class="pgc-seg" role="group">
-                <button type="button" class="pgc-seg-btn" data-on="true">经典三点</button>
-                <button type="button" class="pgc-seg-btn" data-on="false">Claude 三态</button>
-              </span>
-            </label>
-            <p class="pgc-sheet-hint">Claude 三态＝弹跳 / 斜线 / 绕圈轮着放，每 6 秒换一种。</p>
-            <span class="pgc-group">颜色</span>
-            <label class="pgc-set-row"><span class="pgc-set-name">字幕条颜色</span>
-            <span class="pgc-swatches" role="group">
-              <button type="button" class="pgc-swatch pgc-swatch--auto" data-on="false" title="跟随主题">A</button>
-              <button type="button" class="pgc-swatch" data-on="true" title="海蓝" style="--pgc-sw:#4d6bfe"></button>
-              <button type="button" class="pgc-swatch" data-on="false" title="森林" style="--pgc-sw:#2f9e68"></button>
-              <button type="button" class="pgc-swatch" data-on="false" title="日落" style="--pgc-sw:#e07a3f"></button>
-              <button type="button" class="pgc-swatch" data-on="false" title="紫罗兰" style="--pgc-sw:#8b5cf6"></button>
-              <button type="button" class="pgc-swatch" data-on="false" title="玫红" style="--pgc-sw:#e0558c"></button>
-              <button type="button" class="pgc-swatch" data-on="false" title="石墨" style="--pgc-sw:#6b7280"></button>
-            </span></label>
-            <label class="pgc-set-row"><span class="pgc-set-name">跑成功时</span>
-              <span class="pgc-seg" role="group">
-                <button type="button" class="pgc-seg-btn" data-on="true">跟随主题</button>
-                <button type="button" class="pgc-seg-btn" data-on="false">翠绿</button>
-                <button type="button" class="pgc-seg-btn" data-on="false">青色</button>
-              </span>
-            </label>
-            <label class="pgc-set-row"><span class="pgc-set-name">跑失败时</span>
-              <span class="pgc-seg" role="group">
-                <button type="button" class="pgc-seg-btn" data-on="true">跟随主题</button>
-                <button type="button" class="pgc-seg-btn" data-on="false">朱红</button>
-                <button type="button" class="pgc-seg-btn" data-on="false">暖橙</button>
-              </span>
-            </label>
-            <label class="pgc-set-row"><span class="pgc-set-name">俏皮词样子</span>
+              </span>`)}${row('状态标记', `
+              <button type="button" class="pgc-switch" role="switch" data-on="false" aria-checked="false">
+                <span class="pgc-switch-track"><span class="pgc-switch-thumb"></span></span>
+                <span class="pgc-switch-label">经典三点</span>
+              </button>`, '打开后，标记按 Claude 的弹跳 / 斜线 / 绕圈轮换。')}${row('字幕条颜色', `
+              <span class="pgc-swatches" role="group">
+                <button type="button" class="pgc-swatch pgc-swatch--auto" data-on="false" title="跟随主题">A</button>
+                <button type="button" class="pgc-swatch" data-on="true" title="海蓝" style="--pgc-sw:#4d6bfe"></button>
+                <button type="button" class="pgc-swatch" data-on="false" title="玫红" style="--pgc-sw:#e0558c"></button>
+              </span>`)}${row('俏皮词样子', `
               <span class="pgc-seg" role="group">
                 <button type="button" class="pgc-seg-btn" data-on="true">渐隐</button>
                 <button type="button" class="pgc-seg-btn" data-on="false">实心</button>
-                <button type="button" class="pgc-seg-btn" data-on="false">素色</button>
-              </span>
-            </label>
-            <span class="pgc-group">说什么</span>
-            <label class="pgc-set-row"><span class="pgc-set-name">显示俏皮词</span>
+              </span>`)}${row('显示俏皮词', `
               <button type="button" class="pgc-switch" role="switch" data-on="true" aria-checked="true">
                 <span class="pgc-switch-track"><span class="pgc-switch-thumb"></span></span>
                 <span class="pgc-switch-label">开</span>
-              </button>
-            </label>
-            <label class="pgc-set-row"><span class="pgc-set-name">思考原话</span>
+              </button>`)}${row('思考原话', `
               <button type="button" class="pgc-switch" role="switch" data-on="false" aria-checked="false">
                 <span class="pgc-switch-track"><span class="pgc-switch-thumb"></span></span>
                 <span class="pgc-switch-label">关</span>
-              </button>
-            </label>
-            <label class="pgc-set-row"><span class="pgc-set-name">没线索时</span>
-              <span class="pgc-seg" role="group">
-                <button type="button" class="pgc-seg-btn" data-on="false">只报动作</button>
-                <button type="button" class="pgc-seg-btn" data-on="true">猜一猜</button>
-              </span>
-            </label>
-            <p class="pgc-sheet-hint">没在跑工具的时候，选「猜一猜」它会从思考内容里猜一句；猜错很正常，看看就好。</p>
-            <p class="pgc-sheet-note">设置只存在这个浏览器里</p>
+              </button>`, '打开后，主文案下面多一行模型自己写的思考首句')}
           </div>
         </div>
       </div>`;
@@ -187,11 +151,6 @@ ${strip('thinking', `
           ${LOADER}
           <span class="pgc-label">俏皮词样子：实心（一块底色 + 白字）</span>
           ${flavor('琢磨中')}`, '', 'calm', 'solid')}
-${strip('thinking', `
-          <span class="pgc-step">第 10 步</span>
-          ${LOADER}
-          <span class="pgc-label">俏皮词样子：素色（纯文字，连渐隐也关掉）</span>
-          ${flavor('琢磨中')}`, '', 'calm', 'plain')}
       <div class="pgc-summary"><span class="pgc-summary-text">本回合 · 3 次工具 · 2 成 1 败 · 用时 12.4s</span></div>
     </div>
     <p class="doc">主文案是一整句（动作 + 具体对象），左侧是三颗接力跳的点（进行中），右侧是俏皮词（两端渐隐的滚槽，没有封闭边框）。最下面一条是空闲齿轮 + 展开的设置面板。</p>

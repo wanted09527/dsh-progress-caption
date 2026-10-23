@@ -59,8 +59,11 @@ window.__ModuleLoader__.load({
      *  淡入动画一秒能重播两三次，叠起来就是「一直在闪」。这几步改成硬切换，
      *  第 4 步之后状态稳下来，再恢复成淡入。 */
     const SETTLE_STEPS = 3;
-    /** 动画档位：calm = 只有左侧标记慢慢走（默认，最不打扰）；sweep = 文字扫光；off = 全静止。 */
-    const ANIMS = ['calm', 'sweep', 'off'];
+    /** 动画档位：calm = 只有左侧标记慢慢走（默认，最不打扰）；sweep = 文字扫光。
+     *  以前还有第三档 off（全静止），已按用户要求从设置里删掉；老存档里的 off
+     *  由 normalizeSettings 折回 calm，CSS 里那套 .pgc-anim-off 规则仍然保留
+     *  当兜底（见样式段注释）。 */
+    const ANIMS = ['calm', 'sweep'];
     /** 状态标记的形态来源：plain = 原来的三颗点；claude = 照搬 Claude 的三种（弹跳 / 斜线 / 绕圈）轮着放。 */
     const MOTIONS = ['plain', 'claude'];
     /** Claude 那三种形态，顺序和 dsh-claude-style 里一样：bounce → line → orbit。 */
@@ -297,6 +300,22 @@ window.__ModuleLoader__.load({
       load_workspace_dependencies: 'env',
     };
 
+    /**
+     * 动词组 → 兜底名词（字典键）。拿不到对象时用名词把动词补成一句完整的话，
+     * 别留下「正在读取 」这种末尾带空格的半句。
+     * 没列进来的组（recall / plan / skill …）动词本身就是完整说法，单独用就够；
+     * 真没归类的 other 组另外按「动词 + 工具名」兜底。
+     */
+    const GROUP_NOUNS = {
+      exec: 'nounExec',
+      read: 'nounFile',
+      find: 'nounCode',
+      write: 'nounFile',
+      edit: 'nounFile',
+      web: 'nounInfo',
+      delegate: 'nounHelper',
+    };
+
     /** 动词组 → 阶段（判断「看完了 N 个文件」这类话术）。 */
     const GROUP_PHASES = {
       read: 'read', find: 'read', exec: 'exec', write: 'edit', edit: 'edit',
@@ -334,9 +353,6 @@ window.__ModuleLoader__.load({
         disclaimer: '字幕由规则推断，不代表模型真实意图',
         settings: '字幕设置',
         close: '收起设置',
-        groupLook: '长什么样',
-        groupColor: '颜色',
-        groupSay: '说什么',
         preview: '预览',
         size: '字号',
         sizeS: '小',
@@ -347,48 +363,31 @@ window.__ModuleLoader__.load({
         anim: '动画',
         animCalm: '安静',
         animSweep: '扫光',
-        animOff: '全静止',
         motion: '状态标记',
         motionPlain: '经典三点',
         motionClaude: 'Claude 三态',
-        motionHint: 'Claude 三态＝弹跳 / 斜线 / 绕圈轮着放，每 6 秒换一种。',
+        motionHint: '打开后，标记按 Claude 的弹跳 / 斜线 / 绕圈轮换。',
         colorAccent: '字幕条颜色',
-        colorOk: '跑成功时',
-        colorBad: '跑失败时',
         colorFlavor: '俏皮词样子',
         toneTheme: '跟随主题',
         toneTint: '渐隐',
         toneSolid: '实心',
-        tonePlain: '素色',
         swOcean: '海蓝',
-        swForest: '森林',
-        swSunset: '日落',
-        swViolet: '紫罗兰',
         swRose: '玫红',
-        swGraphite: '石墨',
-        swGreen: '翠绿',
-        swTeal: '青色',
-        swRed: '朱红',
-        swOrange: '暖橙',
         words: '显示俏皮词',
         wordsOn: '开',
         wordsOff: '关',
-        facts: '没线索时',
-        factsTools: '只报动作',
-        factsThinking: '猜一猜',
-        factsHint: '没在跑工具的时候，选「猜一猜」它会从思考内容里猜一句；猜错很正常，看看就好。',
-        sheetNote: '设置只存在这个浏览器里',
         idleStrip: '字幕已就绪，现在没有在跑的任务',
         /* 工具 → 人话动词（运行中 / 完成），比「正在执行读取文件」这种拼接自然得多 */
         v_exec_run: '正在执行命令',
         v_exec_done: '跑完命令',
-        v_read_run: '正在读',
+        v_read_run: '正在读取',
         v_read_done: '读完了',
-        v_find_run: '正在搜',
+        v_find_run: '正在搜索',
         v_find_done: '搜完了',
-        v_write_run: '正在写',
+        v_write_run: '正在写入',
         v_write_done: '写好了',
-        v_edit_run: '正在改',
+        v_edit_run: '正在编辑',
         v_edit_done: '改好了',
         v_web_run: '正在搜网络资料',
         v_web_done: '查完资料',
@@ -410,6 +409,12 @@ window.__ModuleLoader__.load({
         v_env_done: '查完运行环境',
         v_other_run: '正在执行',
         v_other_done: '完成了',
+        /* 拿不到对象时的兜底名词：把「正在读取」补成「正在读取文件」这种完整句子。 */
+        nounExec: '命令',
+        nounFile: '文件',
+        nounCode: '代码',
+        nounInfo: '资料',
+        nounHelper: '小助手',
         /* 阶段话术：工具间隙的思考，按「本回合刚干完什么」说人话。
            只说已经发生的事实，不写「在想下一步」这种放之四海皆准的尾巴。 */
         phase_read: '看完了 {n} 个文件',
@@ -470,9 +475,6 @@ window.__ModuleLoader__.load({
         disclaimer: 'Inferred from rules, not the model’s intent',
         settings: 'Caption settings',
         close: 'Close settings',
-        groupLook: 'Shape',
-        groupColor: 'Colour',
-        groupSay: 'What it says',
         preview: 'Preview',
         size: 'Text size',
         sizeS: 'Small',
@@ -483,37 +485,20 @@ window.__ModuleLoader__.load({
         anim: 'Animation',
         animCalm: 'Calm',
         animSweep: 'Shimmer',
-        animOff: 'Still',
         motion: 'Status mark',
         motionPlain: 'Classic dots',
         motionClaude: 'Claude trio',
-        motionHint: 'Claude trio = bounce / line / orbit, one after another, 6s each.',
+        motionHint: 'When on, the mark cycles Claude’s bounce / line / orbit.',
         colorAccent: 'Strip',
-        colorOk: 'When it works',
-        colorBad: 'When it fails',
         colorFlavor: 'Fun word look',
         toneTheme: 'Theme',
         toneTint: 'Faded',
         toneSolid: 'Solid',
-        tonePlain: 'Plain',
         swOcean: 'Ocean',
-        swForest: 'Forest',
-        swSunset: 'Sunset',
-        swViolet: 'Violet',
         swRose: 'Rose',
-        swGraphite: 'Graphite',
-        swGreen: 'Green',
-        swTeal: 'Teal',
-        swRed: 'Red',
-        swOrange: 'Amber',
         words: 'Playful words',
         wordsOn: 'On',
         wordsOff: 'Off',
-        facts: 'When unsure',
-        factsTools: 'Actions only',
-        factsThinking: 'Guess a little',
-        factsHint: 'When no tool is running, “Guess a little” reads the reasoning text for a clue. Guesses can be wrong.',
-        sheetNote: 'Saved in this browser only',
         idleStrip: 'Caption is ready — nothing is running right now',
         v_exec_run: 'running command',
         v_exec_done: 'ran command',
@@ -522,7 +507,7 @@ window.__ModuleLoader__.load({
         v_find_run: 'searching',
         v_find_done: 'searched',
         v_write_run: 'writing',
-        v_write_done: 'wrote',
+        v_write_done: 'written',
         v_edit_run: 'editing',
         v_edit_done: 'edited',
         v_web_run: 'searching the web',
@@ -545,6 +530,11 @@ window.__ModuleLoader__.load({
         v_env_done: 'environment probed',
         v_other_run: 'running',
         v_other_done: 'done with',
+        nounExec: 'command',
+        nounFile: 'a file',
+        nounCode: 'code',
+        nounInfo: 'web',
+        nounHelper: 'subagent',
         phase_read: 'read {n} files',
         phase_edit: 'just edited{target}',
         phase_exec: 'command finished',
@@ -672,49 +662,35 @@ window.__ModuleLoader__.load({
     const SETTINGS_KEY = 'dsh-progress-caption:settings';
     const DEFAULT_SETTINGS = {
       size: 'm', subLine: false, anim: 'calm', motion: 'plain',
-      words: true, factsOnly: false,
-      accent: 'theme', okColor: 'theme', badColor: 'theme', flavorStyle: 'tint',
+      words: true,
+      accent: 'theme', flavorStyle: 'tint',
     };
     const SIZES = ['s', 'm', 'l'];
-    const FLAVOR_STYLES = ['tint', 'solid', 'plain'];
+    /** 俏皮词样子只有两档：渐隐（默认）/ 实心。老存档的 'plain'（素色）已删，
+     *  由 normalizeSettings 折回 'tint'。 */
+    const FLAVOR_STYLES = ['tint', 'solid'];
 
     /**
      * 配色表。值直接写死成十六进制，不再依赖主题变量——主题把颜色关掉时
      * （比如某些皮肤的「素色模式」），字幕条自己还能有颜色，不至于一片灰。
+     * 只剩「跟随主题 / 蓝 / 粉」三项：成功态和失败态的颜色不再让用户挑，
+     * 一律跟主题的 state-success / state-error 走（见 CSS 里 .pgc-strip 的变量块）。
      */
     const ACCENTS = {
       theme: { label: 'toneTheme', value: '' },
       ocean: { label: 'swOcean', value: '#4d6bfe' },
-      forest: { label: 'swForest', value: '#2f9e68' },
-      sunset: { label: 'swSunset', value: '#e07a3f' },
-      violet: { label: 'swViolet', value: '#8b5cf6' },
       rose: { label: 'swRose', value: '#e0558c' },
-      graphite: { label: 'swGraphite', value: '#6b7280' },
-    };
-    const OK_COLORS = {
-      theme: { label: 'toneTheme', value: '' },
-      green: { label: 'swGreen', value: '#2f9e68' },
-      teal: { label: 'swTeal', value: '#12a594' },
-    };
-    const BAD_COLORS = {
-      theme: { label: 'toneTheme', value: '' },
-      red: { label: 'swRed', value: '#d94a3d' },
-      orange: { label: 'swOrange', value: '#e08a2e' },
     };
 
     function pickFrom(table, value, fallbackKey) {
       return table[value] ? value : fallbackKey;
     }
 
-    /** 把选中的颜色折算成 CSS 变量，挂在字幕条根节点上。 */
+    /** 把选中的主色折算成 CSS 变量，挂在字幕条根节点上。 */
     function stripVars(settings) {
       const accent = ACCENTS[settings.accent] || ACCENTS.theme;
-      const ok = OK_COLORS[settings.okColor] || OK_COLORS.theme;
-      const bad = BAD_COLORS[settings.badColor] || BAD_COLORS.theme;
       const vars = {};
       if (accent.value) vars['--pgc-accent'] = accent.value;
-      if (ok.value) vars['--pgc-ok'] = ok.value;
-      if (bad.value) vars['--pgc-bad'] = bad.value;
       return vars;
     }
 
@@ -731,13 +707,12 @@ window.__ModuleLoader__.load({
         subLine: source.subLine === undefined
           ? Number(source.lines) >= 2
           : Boolean(source.subLine),
+        // 老存档里可能还留着 'off'（全静止档已从设置里撤掉）：非法值一律折回默认的 'calm'。
         anim: pick(source.anim, ANIMS, DEFAULT_SETTINGS.anim),
         motion: pick(source.motion, MOTIONS, DEFAULT_SETTINGS.motion),
         words: source.words === undefined ? DEFAULT_SETTINGS.words : Boolean(source.words),
-        factsOnly: source.factsOnly === undefined ? DEFAULT_SETTINGS.factsOnly : Boolean(source.factsOnly),
         accent: pickFrom(ACCENTS, source.accent, DEFAULT_SETTINGS.accent),
-        okColor: pickFrom(OK_COLORS, source.okColor, DEFAULT_SETTINGS.okColor),
-        badColor: pickFrom(BAD_COLORS, source.badColor, DEFAULT_SETTINGS.badColor),
+        // 同上：老存档的 flavorStyle:'plain'（素色档已删）折回 'tint'。
         flavorStyle: pick(source.flavorStyle, FLAVOR_STYLES, DEFAULT_SETTINGS.flavorStyle),
       };
     }
@@ -781,14 +756,23 @@ window.__ModuleLoader__.load({
 
     /**
      * 工具动作的人话：动词组 + 具体对象拼成一整句。
-     * bash → 「正在执行命令 npm test」；read → 「正在读 client.js」；完成态换完成动词。
+     * bash → 「正在执行命令 npm test」；read → 「正在读取 client.js」；完成态换完成动词。
+     * 拿不到对象时补个兜底名词（「正在读取文件」），绝不留「正在读取 」这种末尾带空格的半句。
      */
     function actionText(tool, target, state) {
       const group = TOOL_VERB_GROUPS[tool] || 'other';
       const verb = translate(state === 'running' ? 'v_' + group + '_run' : 'v_' + group + '_done');
-      let object = target ? ' ' + target : '';
-      if (group === 'other' && tool) object = ' ' + tool;
-      return verb + object;
+      // 真没归类的工具：把工具名直接糊上去，至少说清在跑什么（「正在执行 cordis_inspect_query」）。
+      if (group === 'other') return tool ? verb + ' ' + tool : verb;
+      if (target) return verb + ' ' + target;
+      // 完成态（读完了 / 改好了）本身就能独立成句，不用补名词。
+      if (state !== 'running') return verb;
+      const noun = GROUP_NOUNS[group];
+      const word = noun ? translate(noun) : '';
+      // 动词里已经含着这个名词（「正在执行命令」「正在搜网络资料」）就别重复第二次。
+      if (!word || verb.indexOf(word) >= 0) return verb;
+      // 中文连写，英文中间空一格。
+      return verb + (/[A-Za-z]$/.test(verb) ? ' ' : '') + word;
     }
 
     /**
@@ -890,8 +874,10 @@ window.__ModuleLoader__.load({
     }
 
     /**
-     * 从工具参数里抠「到底在碰什么」：命令 → 路径末段 → 搜索词 → 网络搜索词。
+     * 从工具参数里抠「到底在碰什么」：命令 → 路径末段 → 文件字段 → 搜索词 → 网络搜索词。
      * 运行中的调用读 argsRaw；已结算的结果读 call.argsRaw（窗口截断时可能没有）。
+     * 字段顺序就是优先级：命令最具体，文件字段排在搜索词前面（同一份参数里两边都有时，
+     * 「在动哪个文件」比「搜什么词」更该出现在字幕上）。
      */
     function toolTarget(source) {
       const raw = typeof source === 'object' && source !== null
@@ -904,6 +890,16 @@ window.__ModuleLoader__.load({
       if (command) return shrink(command[1]);
       const file = /"path"\s*:\s*"((?:[^"\\]|\\.){1,160})/.exec(raw);
       if (file) return shrink(file[1].split(/[\\/]/).pop() || file[1]);
+      // 各家工具的路径字段叫法不一样：file_path / files[0] / notebook_path 都当文件看。
+      const filePath = /"file_path"\s*:\s*"((?:[^"\\]|\\.){1,160})/.exec(raw);
+      if (filePath) return shrink(filePath[1].split(/[\\/]/).pop() || filePath[1]);
+      const files = /"files"\s*:\s*\[\s*"((?:[^"\\]|\\.){1,160})/.exec(raw);
+      if (files) return shrink(files[1].split(/[\\/]/).pop() || files[1]);
+      const notebook = /"notebook_path"\s*:\s*"((?:[^"\\]|\\.){1,160})/.exec(raw);
+      if (notebook) return shrink(notebook[1].split(/[\\/]/).pop() || notebook[1]);
+      // 工具自带的自然语言描述（子代理、任务类工具常用）：本身就是人话，截断直接用。
+      const description = /"description"\s*:\s*"((?:[^"\\]|\\.){1,160})/.exec(raw);
+      if (description) return shrink(description[1]);
       const pattern = /"pattern"\s*:\s*"((?:[^"\\]|\\.){1,64})/.exec(raw);
       if (pattern) return shrink(pattern[1]);
       const query = /"query"\s*:\s*"((?:[^"\\]|\\.){1,60})/.exec(raw);
@@ -1226,9 +1222,8 @@ window.__ModuleLoader__.load({
       const tail = blocks.length > 0 ? blocks[blocks.length - 1] : null;
       const tailKind = tail ? tail.kind : null;
 
-      // 2) 已经在写回答：整条保持显示（不要闪没），只有「只报事实」才收起来。
+      // 2) 已经在写回答：整条保持显示（不要闪没）。
       if (tailKind === 'text') {
-        if (source.factsOnly) return null;
         return {
           key: 'write:' + (partial.turn || 0) + ':' + (partial.step || 0),
           state: 'writing',
@@ -1268,9 +1263,7 @@ window.__ModuleLoader__.load({
       }
 
       // 4) 还在思考。
-      //    factsOnly（只报事实）：不读思考文本，没有工具在跑就整条收起来。
-      //    否则多层兜底：重试中 → 规则表（读思考文本）→ 阶段话术（本回合干过什么）→ 俏皮词。
-      if (source.factsOnly) return null;
+      //    多层兜底：重试中 → 规则表（读思考文本）→ 阶段话术（本回合干过什么）→ 俏皮词。
       // 上游抖动正在退避：这是事实，比读思考文本猜出来的动作准，所以排在规则表前面。
       const retry = source.retry !== undefined ? source.retry : pendingRetry(nodes, turn);
       if (retry) {
@@ -1320,10 +1313,16 @@ window.__ModuleLoader__.load({
       return tick;
     }
 
-    /** 设置面板里的一行：左边标题，右边控件。 */
-    function settingRow(t, labelKey, control) {
+    /**
+     * 设置面板里的一行：左边标题（可带一行小字说明），右边控件。
+     * 照官方 / Claude 设置页的两栏 row 做，行间用细分隔线分组，
+     * 所以面板里不再有「长什么样 / 颜色 / 说什么」那种大字分组标题。
+     */
+    function settingRow(t, labelKey, control, hintKey) {
       return h('label', { className: 'pgc-set-row', key: labelKey },
-        h('span', { className: 'pgc-set-name' }, t(labelKey)),
+        h('span', { className: 'pgc-set-text' },
+          h('span', { className: 'pgc-set-name' }, t(labelKey)),
+          hintKey ? h('span', { className: 'pgc-set-desc' }, t(hintKey)) : null),
         control);
     }
 
@@ -1412,11 +1411,10 @@ window.__ModuleLoader__.load({
           turnEnds,
           failure,
           retry,
-          factsOnly: settings.factsOnly,
           turn: openTurn,
           turnOpen: openTurn !== null,
         }),
-        [partial, runningCalls, nodes, failure, retry, settings.factsOnly, openTurn, t],
+        [partial, runningCalls, nodes, failure, retry, openTurn, t],
       );
 
       // 一闪而过的状态也要留一会儿再收：模型想得快的时候，字幕常常零点几秒就消失，人来不及读。
@@ -1508,8 +1506,10 @@ window.__ModuleLoader__.load({
         if (shown.state === 'writing') return t('writing');
         if (shown.state === 'running') return actionText(shown.tool, shown.target, 'running');
         if (shown.state === 'error') {
-          if (shown.kind === 'exit') return fmt(t('failExit'), { code: shown.code });
-          if (shown.kind === 'killed') return t('failKilled');
+          // 失败态也带上对象，跟 running 态一个口径：「命令执行失败（exit code 1） npm test」。
+          const withTarget = (sentence) => (shown.target ? sentence + ' ' + shown.target : sentence);
+          if (shown.kind === 'exit') return withTarget(fmt(t('failExit'), { code: shown.code }));
+          if (shown.kind === 'killed') return withTarget(t('failKilled'));
           // 回合级失败：模型这轮没跑完，不是某个工具挂了，措辞要区分开。
           if (shown.kind === 'maxtokens') return t('failMaxTokens');
           if (shown.kind === 'interrupted') return t('failInterrupted');
@@ -1677,7 +1677,7 @@ window.__ModuleLoader__.load({
               onClick: () => setSettingsOpen(false),
             }, '✕')),
           h('div', { className: 'pgc-sheet-body' },
-            h('span', { className: 'pgc-group' }, t('groupLook')),
+            // 没有分组标题了：一行一个设置，行与行之间用 .5px 细分隔线分开。
             settingRow(t, 'size', seg('size', settings.size, [
               { value: 's', label: 'sizeS' },
               { value: 'm', label: 'sizeM' },
@@ -1686,40 +1686,23 @@ window.__ModuleLoader__.load({
             settingRow(t, 'anim', seg('anim', settings.anim, [
               { value: 'calm', label: 'animCalm' },
               { value: 'sweep', label: 'animSweep' },
-              { value: 'off', label: 'animOff' },
             ], (value) => update({ anim: value }))),
-            settingRow(t, 'motion', seg('motion', settings.motion, [
-              { value: 'plain', label: 'motionPlain' },
-              { value: 'claude', label: 'motionClaude' },
-            ], (value) => update({ motion: value }))),
-            h('p', { className: 'pgc-sheet-hint' }, t('motionHint')),
-            h('span', { className: 'pgc-group' }, t('groupColor')),
+            // 状态标记是开关：关＝经典三点，开＝Claude 三态。
+            // 以前是分段控件写两个名字，看着像「两个都要」，其实只能选一个。
+            // 说明从独立的一段小字挪进行里：左标题下面一行 11px 灰字。
+            settingRow(t, 'motion', switchButton(
+              settings.motion === 'claude',
+              t(settings.motion === 'claude' ? 'motionClaude' : 'motionPlain'),
+              '',
+              () => update({ motion: settings.motion === 'claude' ? 'plain' : 'claude' }),
+            ), 'motionHint'),
             settingRow(t, 'colorAccent', swatches('accent', settings.accent, ACCENTS, (value) => update({ accent: value }))),
-            settingRow(t, 'colorOk', seg('okColor', settings.okColor, [
-              { value: 'theme', label: 'toneTheme' },
-              { value: 'green', label: 'swGreen' },
-              { value: 'teal', label: 'swTeal' },
-            ], (value) => update({ okColor: value }))),
-            settingRow(t, 'colorBad', seg('badColor', settings.badColor, [
-              { value: 'theme', label: 'toneTheme' },
-              { value: 'red', label: 'swRed' },
-              { value: 'orange', label: 'swOrange' },
-            ], (value) => update({ badColor: value }))),
             settingRow(t, 'colorFlavor', seg('flavorStyle', settings.flavorStyle, [
               { value: 'tint', label: 'toneTint' },
               { value: 'solid', label: 'toneSolid' },
-              { value: 'plain', label: 'tonePlain' },
             ], (value) => update({ flavorStyle: value }))),
-            h('span', { className: 'pgc-group' }, t('groupSay')),
             settingRow(t, 'words', switchButton(settings.words, settings.words ? t('wordsOn') : t('wordsOff'), '', () => update({ words: !settings.words }))),
-            settingRow(t, 'subLine', switchButton(settings.subLine, settings.subLine ? t('wordsOn') : t('wordsOff'), t('subLineHint'), () => update({ subLine: !settings.subLine }))),
-            settingRow(t, 'facts', seg('facts', settings.factsOnly ? 'tools' : 'thinking', [
-              { value: 'tools', label: 'factsTools' },
-              { value: 'thinking', label: 'factsThinking' },
-            ], (value) => update({ factsOnly: value === 'tools' }))),
-            h('p', { className: 'pgc-sheet-hint' }, t('factsHint')),
-            h('p', { className: 'pgc-sheet-note' }, t('sheetNote')),
-            h('p', { className: 'pgc-sheet-note' }, t('disclaimer')))));
+            settingRow(t, 'subLine', switchButton(settings.subLine, settings.subLine ? t('wordsOn') : t('wordsOff'), '', () => update({ subLine: !settings.subLine })), 'subLineHint'))));
 
       // 注意：这里不再「有字幕就返回整条、没字幕就返回把手」两套结构。
       // 两套结构会让 React 把整棵子树卸载重建，看起来就是闪一下、没有过渡。
@@ -1895,7 +1878,11 @@ window.__ModuleLoader__.load({
      * 动画只碰 opacity / transform / background-position，绝不改宽高，避免推挤布局。
      * ------------------------------------------------------------------ */
     const CSS = `
-/* 自定义配色走这三个变量；没选（跟随主题）时自动退回 DSH 主题色。 */
+/* 自定义配色只走 --pgc-accent 一个变量；没选（跟随主题）时自动退回 DSH 主题色。
+   成功 / 失败两色不再让用户挑（设置里那两项已删），这里直接取主题的
+   state-success / state-error，带十六进制兜底——主题没给变量时也还有颜色。
+   注意：这两个变量仍由下面的 .pgc-strip--ok / .pgc-strip--error 读取，
+   而 JS 侧的 stripVars 不再往里写值（旧版会挂内联变量覆盖）。 */
 .pgc-strip {
   --pgc-accent: var(--dsw-alias-brand-primary, #4d6bfe);
   --pgc-ok: var(--dsw-alias-state-success-primary, #2f9e68);
@@ -2071,6 +2058,13 @@ window.__ModuleLoader__.load({
    左边定住了、右边俏皮词还在滚，一边静一边动，看着像坏了。 */
 .pgc-strip--ok .pgc-dot { background: var(--pgc-ok); }
 .pgc-strip--error .pgc-dot { background: var(--pgc-bad); }
+/* 【.pgc-anim-off 为什么保留】这一档已从设置面板里删掉（ANIMS 只剩 calm / sweep），
+   但样式规则一条都不删：
+   1) 老存档里可能还是 anim:'off'，第一次读进来时 normalizeSettings 会折回 'calm'，
+      可折回之前那一帧、以及以后若有人手动改 localStorage，仍可能带上这个 class；
+   2) 它是「全静止」的唯一兜底样式——真出事时这里能整体停住动画，
+      比临时再加一遍 :not() / !important 干净。
+   所以下面这些 .pgc-anim-off 规则是刻意留着的，不是漏删。 */
 /* 全静止档：点停在原地，只留一颗 —— 排一排不动的点在视觉上像「加载卡住」。 */
 .pgc-anim-off .pgc-dot { animation: none; transform: none; opacity: .55; }
 .pgc-anim-off .pgc-dot:nth-child(2),
@@ -2188,20 +2182,16 @@ window.__ModuleLoader__.load({
 }
 /* 刚出现（还没有「上一句」）时不要滚：条本身已经在播入场动画，再滚一次就显得吵。 */
 .pgc-flavor-still { animation: none; }
-/* 俏皮词三种样式，三档必须一眼分得开：
+/* 俏皮词两种样式，两档必须一眼分得开：
    - tint（默认，无后缀同名规则）：两端渐隐的滚槽，没有底色也没有描边；
    - solid：想要「一块底」的选它，实心胶囊 + 白字，渐变遮罩必须关掉，
-     否则胶囊两头会被啃成透明，就不是胶囊了；
-   - plain：纯文字，连渐隐也关掉，词走到边上直接顶格。
+     否则胶囊两头会被啃成透明，就不是胶囊了。
+   （第三档 plain「素色」已按用户要求删掉：它和默认档只差一个渐隐，纯粹是多余选项。）
    换词动画挂在滚动体上（.pgc-flavor-track 自带 animation），外壳不再挂，
    所以原来「每个词都连胶囊一起重挂载」的闪烁没有了。全静止档由后面的规则统一关掉。 */
 .pgc-flavor-solid .pgc-flavor {
   color: #fff; background: var(--pgc-accent);
   border-radius: 999px;
-  -webkit-mask-image: none; mask-image: none;
-}
-.pgc-flavor-plain .pgc-flavor {
-  color: var(--pgc-accent); background: transparent; opacity: .92;
   -webkit-mask-image: none; mask-image: none;
 }
 /* 成功 / 失败：默认档只换字色，不铺底色、不描边——框都没了，再补一圈颜色就白改了。 */
@@ -2294,7 +2284,7 @@ window.__ModuleLoader__.load({
 .pgc-gear[aria-expanded='true'] { color: #fff; background: var(--dsw-alias-brand-primary, #4f7cff); }
 .pgc-sheet {
   position: absolute; right: 0; bottom: calc(100% + 8px); z-index: 40;
-  width: 300px; box-sizing: border-box; padding: 14px 14px 12px;
+  width: 300px; max-width: calc(100vw - 24px); box-sizing: border-box; padding: 14px 14px 12px;
   display: flex; flex-direction: column; gap: 11px;
   max-height: min(76vh, 560px); overflow-y: auto;
   border-radius: 16px; border: 1px solid var(--dsw-alias-border-l1, rgba(127,127,127,.28));
@@ -2315,19 +2305,12 @@ window.__ModuleLoader__.load({
   transition: background-color .18s ease, color .18s ease;
 }
 .pgc-sheet-close:hover { color: var(--dsw-alias-label-primary, currentColor); background: color-mix(in srgb, currentColor 10%, transparent); }
-.pgc-sheet-body { display: grid; gap: 8px; }
-/* 分组标题做成一条细分隔线 + 小标签，视觉上把面板切成几段，不用数行。 */
-.pgc-group {
-  display: flex; align-items: center; gap: 8px; margin-top: 4px;
-  font-size: 10.5px; font-weight: 600; letter-spacing: .04em;
-  color: var(--dsw-alias-label-secondary, inherit); opacity: .75;
-}
-.pgc-group::after { content: ''; flex: 1; height: 1px; background: var(--dsw-alias-border-l1, rgba(127,127,127,.22)); }
-.pgc-group:first-child { margin-top: 0; }
+/* 设置行竖排；行与行之间靠 .pgc-set-row 自己的上边线分隔，所以这里不留 gap。 */
+.pgc-sheet-body { display: flex; flex-direction: column; gap: 0; }
 /* 色板：一排小圆点，选中的加一圈描边。 */
-.pgc-swatches { display: flex; flex-wrap: wrap; gap: 6px; margin: 0 0 2px; }
+.pgc-swatches { display: flex; flex-wrap: wrap; gap: 6px; margin: 0; }
 .pgc-swatch {
-  position: relative; width: 20px; height: 20px; padding: 0; border-radius: 999px;
+  position: relative; width: 18px; height: 18px; padding: 0; border-radius: 999px;
   border: 1px solid color-mix(in srgb, #000 18%, transparent);
   background: var(--pgc-sw, transparent); color: #fff; font: inherit; font-size: 9px; line-height: 1;
   display: grid; place-items: center; cursor: pointer;
@@ -2337,11 +2320,32 @@ window.__ModuleLoader__.load({
 .pgc-swatch[data-on='true'] { box-shadow: 0 0 0 2px var(--dsw-alias-bg-overlay, Canvas), 0 0 0 4px var(--pgc-sw, currentColor); }
 .pgc-swatch--auto { background: transparent; color: var(--dsw-alias-label-secondary, currentColor); border-style: dashed; font-size: 10px; }
 .pgc-swatch--auto[data-on='true'] { background: color-mix(in srgb, currentColor 12%, transparent); }
-.pgc-sheet-split { display: block; height: 1px; margin: 1px 0; background: var(--dsw-alias-border-l1, rgba(127,127,127,.24)); }
-.pgc-sheet-note { margin: 0; font-size: 10px; line-height: 1.45; opacity: .55; }
-.pgc-sheet-hint { margin: 2px 0 4px; font-size: 10.5px; line-height: 1.55; color: var(--dsw-alias-label-secondary, inherit); opacity: .8; }
-.pgc-set-row { display: flex; align-items: center; justify-content: space-between; gap: 10px; margin: 0; }
-.pgc-set-name { font-size: 11.5px; color: var(--dsw-alias-label-secondary, currentColor); }
+/* 面板底部那两行小字（「设置只存在这个浏览器里」+ 免责声明）已按用户要求删掉：
+   前者是开发细节，后者每个字幕条根节点的 title 上都有，没必要再占可视面积。
+   对应的底部说明样式也一并删掉，面板里不再有小字段落。 */
+/* 设置行：左标题（可带一行灰说明）+ 右控件，照官方 / Claude 设置页的 row 做
+   (.dsh-claude-settings-row)。面板里不再有「长什么样 / 颜色 / 说什么」那种分组标题，
+   分组关系全靠行与行之间的 .5px 细分隔线；弹层比整页设置更紧凑，所以内边距取 10px 0。 */
+.pgc-set-row {
+  display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap;
+  gap: 8px 12px; margin: 0; padding: 10px 0;
+  border-top: .5px solid var(--dsw-alias-border-l2, color-mix(in srgb, currentColor 12%, transparent));
+}
+.pgc-set-row:first-child { border-top: 0; padding-top: 2px; }
+.pgc-set-row:last-child { padding-bottom: 2px; }
+.pgc-set-text { display: flex; flex-direction: column; gap: 2px; min-width: 0; flex: 1 1 auto; }
+.pgc-set-name { font-size: 12.5px; line-height: 1.45; color: var(--dsw-alias-label-primary, currentColor); }
+.pgc-set-desc { font-size: 11px; line-height: 1.5; color: var(--dsw-alias-label-secondary, currentColor); opacity: .78; }
+/* 控件一律贴右、与标题垂直居中；窄屏（<280px）整行换行后控件改贴左，
+   免得它被 margin-left:auto 推到第二行最右端孤零零地挂着。 */
+.pgc-set-row > .pgc-seg,
+.pgc-set-row > .pgc-switch,
+.pgc-set-row > .pgc-swatches { flex: 0 0 auto; margin-left: auto; }
+@media (max-width: 280px) {
+  .pgc-set-row > .pgc-seg,
+  .pgc-set-row > .pgc-switch,
+  .pgc-set-row > .pgc-swatches { margin-left: 0; }
+}
 .pgc-seg { display: inline-flex; align-items: center; gap: 2px; padding: 2px; border-radius: 10px; background: color-mix(in srgb, currentColor 7%, transparent); }
 .pgc-seg-btn {
   min-width: 24px; padding: 3px 8px; border: 0; border-radius: 8px; background: transparent;
@@ -2368,6 +2372,9 @@ window.__ModuleLoader__.load({
 .pgc-anim-off .pgc-flavor-track { animation: none; }
 @media (prefers-reduced-motion: reduce) {
   .pgc-strip, .pgc-strip * { animation: none !important; transition: none !important; }
+  /* 面板也在 .pgc-strip 子树里，上面那条已覆盖到；这里单独再写一遍是给将来
+     有人把面板挪出字幕条根节点时留的保险（红绿过渡、开合位移都属于动效）。 */
+  .pgc-sheet, .pgc-sheet * { animation: none !important; transition: none !important; }
   .pgc-label::after { content: none !important; }
   /* 系统开了「减少动态效果」时，也不再做位移和缩放，只留颜色的硬切换。 */
   .pgc-band { max-height: 7em; opacity: 1; }
@@ -2424,36 +2431,88 @@ window.__ModuleLoader__.load({
   50% { translate: var(--pgc-end-x) var(--pgc-end-y); scale: 1; }
 }
 /* 绕圈（Claude 的 orbit）：四颗点绕同一个椭圆跑，各自的相位差 1/4 圈。
-   点位是逐段采样出来的（不是 rotate 转出来的），因为椭圆不是正圆，
+   点位是逐点采样出来的（不是 rotate 转出来的），因为椭圆不是正圆，
    用 rotate 会把点甩出 18×14 的容器；采样出来的坐标全部落在框内。
-   0% 在左上，走完一圈回到左上，接缝处速度一致，不会「咯噔」。 */
+
+   这里必须每个「扫过去」的半圈写满 7 个中间采样点。原来只写了起点和终点两个点，
+   浏览器在两点之间走直线 —— 那条直线正好穿过椭圆中心，于是有一颗点会突然
+   横穿中间（而不是贴着边绕）。关键帧逐字照搬 dsh-claude-style 的
+   dsh-claude-wait-dot-orbit-*，一个字都没舍得省。 */
 @keyframes pgc-dot-orbit-1 {
   0% { translate: -4.75px -5.8px; }
-  12.5% { translate: 2.9px 5.58px; }
-  25%, 50% { translate: 4.75px 5.8px; }
-  62.5% { translate: -2.9px -5.58px; }
-  100% { translate: -4.75px -5.8px; }
+  0.46% { translate: -4.57px -3.54px; }
+  0.97% { translate: -4.03px -1.36px; }
+  1.55% { translate: -3.15px .64px; }
+  2.26% { translate: -1.97px 2.4px; }
+  3.21% { translate: -.53px 3.85px; }
+  4.6% { translate: 1.11px 4.92px; }
+  7.09% { translate: 2.9px 5.58px; }
+  16.67%, 25%, 50% { translate: 4.75px 5.8px; }
+  50.46% { translate: 4.57px 3.54px; }
+  50.97% { translate: 4.03px 1.36px; }
+  51.55% { translate: 3.15px -.64px; }
+  52.26% { translate: 1.97px -2.4px; }
+  53.21% { translate: .53px -3.85px; }
+  54.6% { translate: -1.11px -4.92px; }
+  57.09% { translate: -2.9px -5.58px; }
+  66.67%, 75%, 100% { translate: -4.75px -5.8px; }
 }
 @keyframes pgc-dot-orbit-2 {
   0%, 25% { translate: 4.75px -5.8px; }
-  37.5% { translate: -2.9px 5.58px; }
-  50%, 75% { translate: -4.75px 5.8px; }
-  87.5% { translate: 2.9px -5.58px; }
-  100% { translate: 4.75px -5.8px; }
+  25.46% { translate: 4.57px -3.54px; }
+  25.97% { translate: 4.03px -1.36px; }
+  26.55% { translate: 3.15px .64px; }
+  27.26% { translate: 1.97px 2.4px; }
+  28.21% { translate: .53px 3.85px; }
+  29.6% { translate: -1.11px 4.92px; }
+  32.09% { translate: -2.9px 5.58px; }
+  41.67%, 50%, 75% { translate: -4.75px 5.8px; }
+  75.46% { translate: -4.57px 3.54px; }
+  75.97% { translate: -4.03px 1.36px; }
+  76.55% { translate: -3.15px -.64px; }
+  77.26% { translate: -1.97px -2.4px; }
+  78.21% { translate: -.53px -3.85px; }
+  79.6% { translate: 1.11px -4.92px; }
+  82.09% { translate: 2.9px -5.58px; }
+  91.67%, 100% { translate: 4.75px -5.8px; }
 }
 @keyframes pgc-dot-orbit-3 {
   0%, 25% { translate: -4.75px 5.8px; }
-  37.5% { translate: 2.9px -5.58px; }
-  50%, 75% { translate: 4.75px -5.8px; }
-  87.5% { translate: -2.9px 5.58px; }
-  100% { translate: -4.75px 5.8px; }
+  25.46% { translate: -4.57px 3.54px; }
+  25.97% { translate: -4.03px 1.36px; }
+  26.55% { translate: -3.15px -.64px; }
+  27.26% { translate: -1.97px -2.4px; }
+  28.21% { translate: -.53px -3.85px; }
+  29.6% { translate: 1.11px -4.92px; }
+  32.09% { translate: 2.9px -5.58px; }
+  41.67%, 50%, 75% { translate: 4.75px -5.8px; }
+  75.46% { translate: 4.57px -3.54px; }
+  75.97% { translate: 4.03px -1.36px; }
+  76.55% { translate: 3.15px .64px; }
+  77.26% { translate: 1.97px 2.4px; }
+  78.21% { translate: .53px 3.85px; }
+  79.6% { translate: -1.11px 4.92px; }
+  82.09% { translate: -2.9px 5.58px; }
+  91.67%, 100% { translate: -4.75px 5.8px; }
 }
 @keyframes pgc-dot-orbit-4 {
   0% { translate: 4.75px 5.8px; }
-  12.5% { translate: -2.9px -5.58px; }
-  25%, 50% { translate: -4.75px -5.8px; }
-  62.5% { translate: 2.9px -5.58px; }
-  100% { translate: 4.75px 5.8px; }
+  0.46% { translate: 4.57px 3.54px; }
+  0.97% { translate: 4.03px 1.36px; }
+  1.55% { translate: 3.15px -.64px; }
+  2.26% { translate: 1.97px -2.4px; }
+  3.21% { translate: .53px -3.85px; }
+  4.6% { translate: -1.11px -4.92px; }
+  7.09% { translate: -2.9px -5.58px; }
+  16.67%, 25%, 50% { translate: -4.75px -5.8px; }
+  50.46% { translate: -4.57px 3.54px; }
+  50.97% { translate: -4.03px 1.36px; }
+  51.55% { translate: -3.15px .64px; }
+  52.26% { translate: -1.97px 2.4px; }
+  53.21% { translate: -.53px 3.85px; }
+  54.6% { translate: 1.11px 4.92px; }
+  57.09% { translate: 2.9px 5.58px; }
+  66.67%, 75%, 100% { translate: 4.75px 5.8px; }
 }
 /* 扫光关键帧：整条光带从左边界外一路走到右边界外，全程匀速横穿。
    宽度就是整框（100%），所以 -100% 时完全在左侧看不见，100% 时完全越过右侧，
@@ -2530,8 +2589,9 @@ window.__ModuleLoader__.load({
         normalizeSettings,
         stripVars,
         ACCENTS,
-        OK_COLORS,
-        BAD_COLORS,
+        ANIMS,
+        MOTIONS,
+        FLAVOR_STYLES,
         DEFAULT_SETTINGS,
         WORD_COUNT,
         RULES,
