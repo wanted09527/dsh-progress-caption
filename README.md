@@ -16,18 +16,26 @@
 
 ## 怎么装
 
-先从 GitHub 克隆到你喜欢的位置（示例放在 `E:\deepseek\插件\plugins\`）：
+**推荐：在 DSH 的插件市场里装。** 打开插件市场（发现页）搜 `dsh-progress-caption`，点安装。
+市场会从 npm 拉预构建的包，不用编译、不用装依赖，装完就能用。
+
+命令行装也可以，让 agent 调 `plugin_manager` → `install_bundle`，`target` 填插件目录。
+
+包也发在 npm 上：
+
+```
+npm i dsh-progress-caption
+```
+
+不过要注意：**只用 `npm i` 不会自动注册成 DSH 插件**，它只是把代码下载下来。想让 DSH 加载它，还是得走插件市场或 `install_bundle`。
+
+手动装（从源码）：
 
 ```bash
 git clone https://github.com/wanted09527/dsh-progress-caption.git
 ```
 
-然后在插件管理器里用它所在的目录安装：
-`E:\deepseek\插件\plugins\dsh-progress-caption`
-（或在对话里让 agent 调 `plugin_manager` → `install_bundle`，target 填上面的路径）。
-本地开发时也可以不克隆，直接用你自己的工作目录。
-
-装完不需要重启：新 bundle 会通过热加载生效；**替换已装包的代码才需要重启**。
+然后在插件管理器里用克隆下来的目录安装。装完不需要重启：新 bundle 会通过热加载生效；**替换已装包的代码才需要重启**。
 
 ## 不做什么
 
