@@ -3,6 +3,14 @@
 本文件记录每一版的用户可见变化。格式参考 [Keep a Changelog](https://keepachangelog.com/zh-CN/1.1.0/)，
 版本号遵循[语义化版本](https://semver.org/lang/zh-CN/)。
 
+## 0.3.1 — 2026-10-24
+
+### 文档
+
+- README 的「怎么装」补上两条真实路径：在 DSH 插件市场里安装（从 npm 拉预构建包），
+  以及 `npm i dsh-progress-caption` 只是取回源码、不会自动注册成插件这一注意事项。
+- 发布到 npm：`dsh-progress-caption` 0.3.1 起可在 npm 上直接取到，市场安装走 npm 会更快。
+
 ## 0.3.0 — 2026-10-24
 
 ### 新增

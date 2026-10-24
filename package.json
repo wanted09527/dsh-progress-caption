@@ -1,6 +1,6 @@
 {
   "name": "dsh-progress-caption",
-  "version": "0.3.0",
+  "version": "0.3.1",
   "description": "DSH 客户端插件：在输入框上方显示当前思考到第几步、在干什么、成没成；纯本机规则推断，不调模型、不发网络请求。 A DSH client plugin that captions the thinking phase with step, action and outcome.",
   "author": "陈雅儒",
   "license": "MIT",
