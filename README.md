@@ -1,5 +1,7 @@
 # dsh-progress-caption 思维链进度字幕
 
+[![Awesome DSH Plugin](https://awesome-dsh-plugin.com/badge.svg)](https://awesome-dsh-plugin.com)
+
 在 DSH 的输入框上方加一行小字，回答三个问题：**现在第几步、在干什么、成没成**。
 给新手用：不用点开思考过程，也能看懂 AI 卡在哪一步。
 
